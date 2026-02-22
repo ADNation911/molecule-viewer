@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Molecular Viewer</title>
+
+  <!-- 3Dmol -->
+  <script src="https://3dmol.csb.pitt.edu/build/3Dmol-min.js"></script>
+
+  <!-- Styles -->
+  <link rel="stylesheet" href="styles.css" />
+</head>
+
+<body>
+
+  <!-- Menu Bar -->
+  <div class="menu-bar">
+    <span>File</span>
+    <span>Edit</span>
+    <span>Build</span>
+    <span>Display</span>
+    <span>Settings</span>
+    <span>Scenes</span>
+    <span>Help</span>
+  </div>
+
+  <!-- Toolbar -->
+  <div class="tool-bar">
+    <button id="uploadBtn">Upload</button>
+    <button id="zoomBtn">Zoom</button>
+    <button id="rotateBtn">Rotate</button>
+    <button id="panBtn">Pan</button>
+
+    <button id="cartoonBtn">Cartoon</button>
+    <button id="surfaceBtn">Surface</button>
+    <button id="sticksBtn">Sticks</button>
+
+    <button id="redoBtn">Redo</button>
+    <button id="renderBtn">Render</button>
+  </div>
+
+  <!-- Main Layout -->
+  <div class="main-container">
+
+    <!-- Viewer -->
+    <div id="viewer" class="viewer">
+      <div class="viewer-placeholder">
+        Upload a molecule to begin
+      </div>
+    </div>
+
+    <div class="resize-handle"></div>
+
+    <!-- Object Panel -->
+    <div class="side-panel">
+      <h3>Objects</h3>
+
+      <div class="object-item">
+        <span class="dot"></span>
+        <span>Molecule</span>
+
+        <div class="controls">
+          <button>A</button>
+          <button>S</button>
+          <button>H</button>
+          <button>L</button>
+          <button>C</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Console -->
+  <div class="console">
+    <pre>Ready.</pre>
+  </div>
+
+  <!-- App Logic -->
+  <script src="script.js"></script>
+
+</body>
+</html>
