@@ -1,4 +1,26 @@
 // =======================
+// Supabase Client (SAFE INIT)
+// =======================
+const SUPABASE_URL = "YOUR_SUPABASE_URL";
+const SUPABASE_ANON_KEY = "YOUR_SUPABASE_ANON_KEY";
+
+let supabaseClient = null;
+
+// Initialize Supabase ONLY if real credentials are provided
+if (
+  SUPABASE_URL !== "YOUR_SUPABASE_URL" &&
+  SUPABASE_ANON_KEY !== "YOUR_SUPABASE_ANON_KEY"
+) {
+  supabaseClient = supabase.createClient(
+    SUPABASE_URL,
+    SUPABASE_ANON_KEY
+  );
+  console.log("Supabase initialized");
+} else {
+  console.warn("Supabase not configured yet — auth disabled");
+}
+
+// =======================
 // Global State
 // =======================
 let viewer;
@@ -35,9 +57,11 @@ function applyStyle(style) {
   if (style === "cartoon") {
     viewer.setStyle({}, { cartoon: { color: "spectrum" } });
   }
+
   if (style === "sticks") {
     viewer.setStyle({}, { stick: {} });
   }
+
   if (style === "surface") {
     viewer.setStyle({}, { cartoon: { color: "spectrum" } });
     viewer.addSurface($3Dmol.SurfaceType.VDW, { opacity: 0.7 });
@@ -55,6 +79,8 @@ document.getElementById("uploadBtn").onclick = () => {
 
   input.onchange = e => {
     const file = e.target.files[0];
+    if (!file) return;
+
     const reader = new FileReader();
 
     reader.onload = () => {
@@ -160,31 +186,46 @@ document.querySelectorAll(".controls button").forEach(btn => {
 });
 
 // =======================
-initViewer();
-
-const supabase = supabase.createClient(
-  "SUPABASE_URL",
-  "SUPABASE_ANON_KEY"
-);
-
-// Login
+// Auth (Supabase)
+// =======================
 document.getElementById("loginBtn").onclick = async () => {
-  const email = prompt("Enter email");
-  await supabase.auth.signInWithOtp({ email });
-  alert("Check your email for login link");
+  if (!supabaseClient) {
+    alert("Authentication is not configured yet");
+    return;
+  }
+
+  const email = prompt("Enter your email");
+  if (!email) return;
+
+  const { error } = await supabaseClient.auth.signInWithOtp({ email });
+
+  if (error) {
+    alert(error.message);
+  } else {
+    alert("Check your email for the login link");
+  }
 };
 
-// Logout
 document.getElementById("logoutBtn").onclick = async () => {
-  await supabase.auth.signOut();
+  if (!supabaseClient) return;
+  await supabaseClient.auth.signOut();
   location.reload();
 };
 
-// Session handling
-supabase.auth.onAuthStateChange((event, session) => {
-  if (session) {
-    document.getElementById("authButtons").style.display = "none";
-    document.getElementById("userSection").style.display = "block";
-    document.getElementById("userEmail").innerText = session.user.email;
-  }
-});
+if (supabaseClient) {
+  supabaseClient.auth.onAuthStateChange((event, session) => {
+    if (session) {
+      document.getElementById("authButtons").style.display = "none";
+      document.getElementById("userSection").style.display = "block";
+      document.getElementById("userEmail").innerText = session.user.email;
+    } else {
+      document.getElementById("authButtons").style.display = "block";
+      document.getElementById("userSection").style.display = "none";
+    }
+  });
+}
+
+// =======================
+// Init App
+// =======================
+initViewer();
