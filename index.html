@@ -6,7 +6,7 @@
 
   <!-- 3Dmol -->
   <script src="https://3dmol.csb.pitt.edu/build/3Dmol-min.js"></script>
-
+<script src="https://unpkg.com/@supabase/supabase-js@2"></script>
   <!-- Styles -->
   <link rel="stylesheet" href="styles.css" />
 </head>
@@ -39,6 +39,19 @@
     <button id="renderBtn">Render</button>
   </div>
 
+  <!-- NEW: Auth Section -->
+  <div class="auth-section">
+    <div id="authButtons">
+      <button id="loginBtn" class="auth-btn">Login</button>
+      <button id="signupBtn" class="auth-btn">Sign Up</button>
+    </div>
+    <div id="userSection" style="display: none;">
+      <span id="userEmail" class="user-email"></span>
+      <button id="saveBtn" class="save-btn">💾 Save</button>
+      <button id="logoutBtn" class="auth-btn">Logout</button>
+    </div>
+  </div>
+</div>
   <!-- Main Layout -->
   <div class="main-container">
 

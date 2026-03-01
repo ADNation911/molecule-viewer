@@ -161,3 +161,30 @@ document.querySelectorAll(".controls button").forEach(btn => {
 
 // =======================
 initViewer();
+
+const supabase = supabase.createClient(
+  "SUPABASE_URL",
+  "SUPABASE_ANON_KEY"
+);
+
+// Login
+document.getElementById("loginBtn").onclick = async () => {
+  const email = prompt("Enter email");
+  await supabase.auth.signInWithOtp({ email });
+  alert("Check your email for login link");
+};
+
+// Logout
+document.getElementById("logoutBtn").onclick = async () => {
+  await supabase.auth.signOut();
+  location.reload();
+};
+
+// Session handling
+supabase.auth.onAuthStateChange((event, session) => {
+  if (session) {
+    document.getElementById("authButtons").style.display = "none";
+    document.getElementById("userSection").style.display = "block";
+    document.getElementById("userEmail").innerText = session.user.email;
+  }
+});
