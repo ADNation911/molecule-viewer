@@ -1,4 +1,5 @@
 
+
 from fastapi import Header, HTTPException
 from jose import jwt, JWTError
 
@@ -34,3 +35,4 @@ def get_current_user(authorization: str = Header(None)):
 
     except JWTError:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
+    

@@ -17,6 +17,7 @@ app.add_middleware(
 def health():
     return {"status": "ok"}
 
+
 @app.get("/protected")
 def protected_route(user=Depends(get_current_user)):
     return {

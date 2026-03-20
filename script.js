@@ -412,6 +412,5 @@ if (toggleChatBtn) {
     document.querySelector('.chat-side-panel').classList.toggle('hide-panel');
   };
 }
-
 // =======================
 initViewer();
