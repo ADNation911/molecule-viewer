@@ -1,0 +1,2 @@
+# PDB records use fixed-width 80-column lines; their trailing spaces are significant.
+*.pdb binary
