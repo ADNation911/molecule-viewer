@@ -205,7 +205,7 @@ dialog > p { font-size: 12px; line-height: 1.85; }
 .activity-list li { padding: 12px 0; border-bottom: 1px solid var(--border); font-size: 12px; display: flex; align-items: baseline; gap: 15px; line-height: 1.6; }
 .activity-list time { font: 10px monospace; color: var(--muted); white-space: nowrap; }
 
-/* Phase 2 object workspace and molecular exploration */
+/* Object workspace and molecular exploration */
 .object-list { display: grid; gap: 6px; max-height: 210px; overflow: auto; scrollbar-width: thin; }
 .object-empty { font-size: 10px; padding: 12px 7px; border: 1px dashed var(--border); border-radius: 7px; text-align: center; }
 .object-card { display: grid; grid-template-columns: minmax(0, 1fr) 26px 26px; gap: 3px; align-items: center; border: 1px solid transparent; border-radius: 8px; padding: 3px; }
@@ -254,6 +254,37 @@ dialog > p { font-size: 12px; line-height: 1.85; }
 .named-selection-row strong { font-size: 9.5px; }
 .named-selection-row small { font-size: 8px; color: var(--muted); }
 
+/* Measurement and structural alignment tools */
+.analysis-section .section-heading > div { display: flex; align-items: center; gap: 8px; }
+.analysis-section .section-heading .text-button { font-size: 9px; }
+.measurement-tools { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; margin-top: 14px; }
+.measurement-tools button { border: 1px solid var(--border); border-radius: 6px; background: var(--panel); color: var(--muted); padding: 8px 4px; font-size: 9px; }
+.measurement-tools button:hover:not(:disabled) { background: var(--soft); color: var(--text); }
+.measurement-tools button[aria-pressed=true] { background: var(--selected); border-color: var(--selected-border); color: var(--accent); font-weight: 650; }
+.measurement-guide { min-height: 30px; display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 9px; }
+.measurement-guide p { color: var(--muted); font-size: 9px; line-height: 1.5; }
+.measurement-list { display: grid; gap: 6px; max-height: 190px; overflow: auto; margin-top: 8px; scrollbar-width: thin; }
+.measurement-list > .muted { font-size: 9.5px; padding: 8px 0; }
+.measurement-row { display: grid; grid-template-columns: minmax(0, 1fr) 25px; align-items: start; gap: 5px; border: 1px solid var(--border); background: var(--soft); border-radius: 7px; padding: 8px 6px 8px 9px; }
+.measurement-row > div { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 7px; }
+.measurement-row strong, .measurement-row span { font-size: 9.5px; }
+.measurement-row span { color: var(--accent); font-variant-numeric: tabular-nums; font-weight: 650; }
+.measurement-row small { grid-column: 1 / -1; color: var(--muted); font-size: 7.8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.analysis-divider { border-top: 1px solid var(--border); margin: 21px 0; }
+.analysis-copy { font-size: 9.5px; line-height: 1.65; margin-top: 9px; }
+.alignment-moving-row { display: flex; justify-content: space-between; gap: 10px; margin-top: 16px; padding: 9px; background: var(--soft); border-radius: 6px; font-size: 9px; }
+.alignment-moving-row span { color: var(--muted); }
+.alignment-moving-row strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.alignment-chain-grid { display: grid; gap: 8px; margin-top: 10px; }
+.alignment-chain-grid label { color: var(--muted); font-size: 9px; }
+.alignment-chain-grid select { margin-top: 5px; font-size: 9.5px; }
+.alignment-actions { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; margin-top: 13px; }
+.alignment-actions .button { font-size: 9.5px; padding: 7px 9px; }
+.alignment-result { margin-top: 12px; padding: 10px; background: var(--soft); border-radius: 7px; display: flex; flex-direction: column; gap: 5px; }
+.alignment-result > strong { font-size: 13px; color: var(--accent); font-variant-numeric: tabular-nums; }
+.alignment-result > span { font-size: 9px; }
+.alignment-result > small, .alignment-result > .muted { color: var(--muted); font-size: 8.5px; line-height: 1.55; }
+
 @media (min-width: 1450px) {
   .toolbar-label { display: block; }
   .style-options button { font-size: 11px; padding: 7px 11px; }
@@ -292,7 +323,7 @@ dialog > p { font-size: 12px; line-height: 1.85; }
   .brand-mark svg { width: 21px; height: 21px; }
   .menu-bar { margin-left: 0; gap: 0; }
   .menu summary, .menu-help { padding: 8px 7px; font-size: 11px; }
-  .menu-bar .menu:nth-child(2) { display: none; }
+  .menu-bar .menu:nth-child(2), .menu-bar .menu:nth-child(4) { display: none; }
   .assistant-button { min-height: 30px; padding: 6px; }
   .assistant-button > span:nth-child(2), .soon-dot, .header-actions > .icon-button { display: none; }
   .menu-popover { width: 235px; left: -40px; }

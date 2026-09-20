@@ -1,6 +1,6 @@
 # Molecule3D
 
-A browser workspace for exploring molecular structures. The current local development release supports multiple independently styled objects, sequence and ligand exploration, named selections, validated local imports, and RCSB PDB fetching.
+A browser workspace for exploring molecular structures. The current local development release supports multiple independently styled objects, sequence and ligand exploration, geometric measurements, backbone alignment, validated local imports, and RCSB PDB fetching.
 
 ## Run locally
 
@@ -29,6 +29,8 @@ Stop the dev server before starting preview: both use port 5173. Preview serves 
 - Object-scoped cartoon, genuine ribbon, sticks, ball-and-stick, spheres and van der Waals surfaces.
 - Independent object color, opacity, visibility, water, ligand, residue-type and label controls.
 - Chain sequences; chain, residue, ligand and atom selections; ligand isolation; 4 Å ligand neighborhoods; reusable named selections.
+- Persistent distance, angle and dihedral measurements across atoms and objects, with calculated values and 3D annotations.
+- Sequence-matched Cα/P backbone alignment between objects, iterative 2 Å outlier rejection, RMSD reporting and original-coordinate restore.
 - Undo/redo for the active object's display settings. Camera movements are independent.
 - Drag rotation, right-drag pan, scroll/button zoom, fit, opt-in auto-rotation, keyboard shortcuts.
 - Resizable/collapsible inspector, light/dark theme, helpful empty/error states and session activity log.
@@ -37,7 +39,7 @@ Files are read locally; the app does not send structure contents to a server or 
 
 ## Limits
 
-Each file may be up to 10 MB and 75,000 atoms; the combined workspace limit is 120,000 atoms. Surface generation is limited to 15,000 atoms per object. Only the first model/SDF record from each file is displayed. Cartoon and ribbon are unavailable without a supported backbone. Missing residue/chain annotations are shown as zero rather than invented. Neighbor lists are geometric proximity results, not claims about chemical bonds. Measurements, alignment, saving sessions and AI answers are future capabilities.
+Each file may be up to 10 MB and 75,000 atoms; the combined workspace limit is 120,000 atoms. Surface generation is limited to 15,000 atoms per object. Only the first model/SDF record from each file is displayed. Cartoon and ribbon are unavailable without a supported backbone. Missing residue/chain annotations are shown as zero rather than invented. Neighbor lists are geometric proximity results, not claims about chemical bonds. Alignment uses identical residues from a global sequence alignment and one Cα or phosphate anchor per residue; its RMSD is a geometric comparison, not a claim of biological equivalence. Saving sessions and AI answers are future capabilities.
 
 3Dmol.js is pinned to 2.5.5 and Vite to 8.3.0, with a committed lockfile. The production build currently reports upstream 3Dmol warnings for its embedded-viewer callback `eval` and its 574 kB renderer bundle; the application does not use that callback path or evaluate user code. Browser UI checks must accompany build/test success.
 
@@ -47,6 +49,7 @@ Each file may be up to 10 MB and 75,000 atoms; the combined workspace limit is 1
 - `src/viewer.js`: 3Dmol adapter and molecular rendering.
 - `src/structures.js`: import validation, metadata and visibility selection.
 - `src/pdb.js`: PDB ID validation and RCSB fetch behavior.
+- `src/analysis.js`: measurement geometry, sequence correspondence and rigid-body superposition.
 - `src/history.js`: bounded, immutable display history.
 - `src/samples.js`, `public/samples/`: bundled sample catalog/data.
 - `tests/`: import and history regression checks.

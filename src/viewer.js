@@ -1,5 +1,6 @@
 import * as Mol from '3dmol';
 import { summarizeAtoms, visibleSelection, residueSelector } from './structures.js';
+import { applyTransform, formatMeasurement, measurementValue } from './analysis.js';
 
 const chainColors = [0x70c9bd, 0xf0bd79, 0xa499d9, 0x81b6da, 0xea9c9f, 0xb5cc86];
 const solidColors = { teal: 0x36b5a3, amber: 0xe5a64b, violet: 0x9b8be2, rose: 0xe08a9b };
@@ -70,10 +71,11 @@ export class MolecularViewer {
     this.view.render();
   }
 
-  apply(objects, selection = null) {
+  apply(objects, selection = null, measurements = [], measurementDraft = []) {
     const version = ++this.revision;
     this.view.removeAllSurfaces();
     this.view.removeAllLabels();
+    this.view.removeAllShapes();
     for (const object of objects) {
       const entry = this.models.get(object.id);
       if (!entry) continue;
@@ -138,7 +140,61 @@ export class MolecularViewer {
         if (primary.length) model.setStyle({ or: primary.map(item => combine(visible, item)) }, { stick: { color: 0xffc857, radius: .25 }, sphere: { color: 0xffc857, scale: .34 } }, true);
       }
     }
+    this.drawMeasurements(objects, measurements, measurementDraft);
     this.view.render();
+  }
+
+  resolvePoint(objects, descriptor) {
+    const object = objects.find(item => item.id === descriptor.objectId);
+    const entry = this.models.get(descriptor.objectId);
+    if (!object || !entry) return null;
+    const atom = entry.atoms.find(item => item.__workspaceIndex === descriptor.atomIndex);
+    return atom ? { object, atom } : null;
+  }
+
+  drawMeasurements(objects, measurements, draft) {
+    const drawPoint = (point, color, radius = .22) => this.view.addSphere({ center: point, radius, color });
+    for (const measurement of measurements) {
+      const resolved = measurement.points.map(point => this.resolvePoint(objects, point));
+      if (resolved.some(point => !point)) continue;
+      const points = resolved.map(item => item.atom);
+      const color = 0xffc857;
+      for (let index = 1; index < points.length; index++) {
+        this.view.addLine({ start: points[index - 1], end: points[index], color, dashed: true, dashLength: .35, gapLength: .18 });
+      }
+      points.forEach(point => drawPoint(point, color));
+      try {
+        const value = measurementValue(measurement.type, points);
+        const center = points.reduce((sum, point) => ({ x: sum.x + point.x, y: sum.y + point.y, z: sum.z + point.z }), { x: 0, y: 0, z: 0 });
+        center.x /= points.length; center.y /= points.length; center.z /= points.length;
+        this.view.addLabel(formatMeasurement(measurement.type, value), {
+          position: center, fontSize: 12, fontColor: '#182126', backgroundColor: '#ffc857',
+          backgroundOpacity: .94, borderRadius: 3, inFront: true,
+        });
+      } catch { /* An invalidated measurement stays out of the viewport. */ }
+    }
+    for (const descriptor of draft) {
+      const resolved = this.resolvePoint(objects, descriptor);
+      if (resolved) drawPoint(resolved.atom, 0x4dd7c0, .3);
+    }
+  }
+
+  setCoordinates(id, coordinates) {
+    const entry = this.models.get(id);
+    if (!entry || coordinates.length !== entry.atoms.length) throw new Error('The object coordinates could not be updated.');
+    entry.model.setCoordinates([coordinates.map(point => [point.x, point.y, point.z])], 'array');
+    entry.model.setFrame(0);
+    const atoms = entry.model.selectedAtoms({});
+    const summary = summarizeAtoms(atoms);
+    entry.atoms = atoms;
+    entry.summary = summary;
+    return { atoms, summary };
+  }
+
+  transform(id, transform) {
+    const entry = this.models.get(id);
+    if (!entry) throw new Error('Choose a valid moving object.');
+    return this.setCoordinates(id, entry.atoms.map(atom => applyTransform(atom, transform)));
   }
 
   fit(id) {

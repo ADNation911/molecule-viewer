@@ -8,20 +8,27 @@ import {
 import { fetchPdbStructure } from './pdb.js';
 import { MolecularViewer } from './viewer.js';
 import { samples } from './samples.js';
+import {
+  measurementValue, formatMeasurement, matchBackboneAtoms, refinedSuperposition,
+} from './analysis.js';
 
 const $ = id => document.getElementById(id);
 const all = selector => [...document.querySelectorAll(selector)];
 const activities = [];
 const objects = [];
 const namedSelections = [];
+const measurements = [];
 let renderer;
 let activeId = null;
 let selection = null;
+let measurementMode = null;
+let measurementDraft = [];
 let busy = false;
 let spinning = false;
 let ready = false;
 let nextObjectId = 1;
 let nextSelectionId = 1;
+let nextMeasurementId = 1;
 
 mountIcons();
 
@@ -58,10 +65,11 @@ function setBusy(value, message = 'Reading structure…') {
   $('busy-overlay').hidden = !value;
   $('viewer').setAttribute('aria-busy', String(value));
   syncControls();
+  syncAnalysis();
 }
 
 function renderViewer() {
-  renderer.apply(objects, selection);
+  renderer.apply(objects, selection, measurements, measurementDraft);
 }
 
 function styleLabel(style) {
@@ -100,6 +108,8 @@ function syncControls() {
     ? 'Viewer unavailable'
     : busy
       ? 'Opening structure…'
+      : measurementMode
+        ? `${measurementMode[0].toUpperCase() + measurementMode.slice(1)} measurement · ${measurementDraft.length}/${requiredMeasurementAtoms[measurementMode]} atoms picked`
       : current
         ? `${objects.length} object${objects.length === 1 ? '' : 's'} · ${current.summary.atomCount.toLocaleString()} atoms active · ${styleLabel(display.style)}`
         : 'Ready to explore';
@@ -283,6 +293,101 @@ function syncNamedSelections() {
   }
 }
 
+const requiredMeasurementAtoms = { distance: 2, angle: 3, dihedral: 4 };
+
+function measurementAtom(descriptor) {
+  return objectById(descriptor.objectId)?.atoms.find(atom => atom.__workspaceIndex === descriptor.atomIndex) || null;
+}
+
+function atomDisplayName(object, atom) {
+  const atomName = String(atom.atom || atom.elem || 'Atom').trim();
+  const residue = atom.resn ? ` · ${atom.resn} ${atom.resi}${atom.icode || ''}${atom.chain ? `:${atom.chain}` : ''}` : '';
+  return `${object.title} · ${atomName} ${atom.serial || atom.__workspaceIndex + 1}${residue}`;
+}
+
+function appendChainOptions(select, object) {
+  const previous = select.value;
+  select.replaceChildren(new Option('Auto · best matching chain', ''));
+  if (object) for (const chain of object.summary.chains) {
+    const count = chain.residues.filter(residue => !residue.hetflag).length;
+    if (count >= 3) select.append(new Option(`Chain ${chain.label} · ${count} residues`, chain.id));
+  }
+  if ([...select.options].some(option => option.value === previous)) select.value = previous;
+}
+
+function syncAnalysis() {
+  const current = activeObject();
+  all('[data-measure]').forEach(button => {
+    button.setAttribute('aria-pressed', String(measurementMode === button.dataset.measure));
+    button.disabled = !current || busy;
+  });
+  $('measurement-cancel').hidden = !measurementMode;
+  const needed = measurementMode ? requiredMeasurementAtoms[measurementMode] : 0;
+  $('measurement-instruction').textContent = measurementMode
+    ? `Pick ${needed - measurementDraft.length} more atom${needed - measurementDraft.length === 1 ? '' : 's'} in the 3D view.`
+    : 'Choose a measurement, then pick atoms in order.';
+  $('measurement-count').textContent = measurements.length;
+  $('measurement-list').replaceChildren();
+  if (!measurements.length) {
+    const empty = document.createElement('p');
+    empty.className = 'muted';
+    empty.textContent = 'Distances, angles, and dihedrals will appear here.';
+    $('measurement-list').append(empty);
+  } else for (const measurement of measurements) {
+    const row = document.createElement('div');
+    row.className = 'measurement-row';
+    const detail = document.createElement('div');
+    const title = document.createElement('strong');
+    title.textContent = measurement.type[0].toUpperCase() + measurement.type.slice(1);
+    const atoms = measurement.points.map(measurementAtom);
+    const value = document.createElement('span');
+    try { value.textContent = formatMeasurement(measurement.type, measurementValue(measurement.type, atoms)); }
+    catch { value.textContent = 'Unavailable'; }
+    const description = document.createElement('small');
+    description.textContent = measurement.points.map((point, index) => atomDisplayName(objectById(point.objectId), atoms[index])).join(' → ');
+    detail.append(title, value, description);
+    const remove = document.createElement('button');
+    remove.className = 'object-icon';
+    remove.dataset.removeMeasurement = measurement.id;
+    remove.setAttribute('aria-label', `Delete ${measurement.type} measurement`);
+    remove.textContent = '×';
+    row.append(detail, remove);
+    $('measurement-list').append(row);
+  }
+  $('clear-measurements').disabled = !measurements.length || busy;
+
+  const referenceSelect = $('alignment-reference');
+  const previousReference = referenceSelect.value;
+  referenceSelect.replaceChildren(new Option(objects.length > 1 ? 'Choose reference object' : 'Add another object first', ''));
+  for (const object of objects) if (object.id !== activeId) referenceSelect.append(new Option(object.title, object.id));
+  if (previousReference && [...referenceSelect.options].some(option => option.value === previousReference)) referenceSelect.value = previousReference;
+  else if (referenceSelect.options.length === 2) referenceSelect.selectedIndex = 1;
+  const reference = objectById(referenceSelect.value);
+  $('alignment-moving').textContent = current?.title || 'No active object';
+  appendChainOptions($('alignment-moving-chain'), current);
+  appendChainOptions($('alignment-reference-chain'), reference);
+  $('alignment-reference').disabled = !current || objects.length < 2 || busy;
+  $('alignment-moving-chain').disabled = !current || busy;
+  $('alignment-reference-chain').disabled = !reference || busy;
+  $('align-objects').disabled = !current || !reference || busy;
+  $('reset-alignment').disabled = !current?.alignment || busy;
+  $('alignment-result').replaceChildren();
+  if (current?.alignment) {
+    const heading = document.createElement('strong');
+    heading.textContent = `${current.alignment.rmsd.toFixed(3)} Å RMSD`;
+    const meta = document.createElement('span');
+    meta.textContent = `${current.alignment.matchedCount} backbone atoms · ${Math.round(current.alignment.identity * 100)}% sequence identity`;
+    const chains = document.createElement('small');
+    chains.textContent = `Chain ${current.alignment.movingChain || '—'} → ${current.alignment.referenceTitle}, chain ${current.alignment.referenceChain || '—'}${current.alignment.rejectedCount ? ` · ${current.alignment.rejectedCount} outlier${current.alignment.rejectedCount === 1 ? '' : 's'} removed` : ''}`;
+    $('alignment-result').append(heading, meta, chains);
+  } else {
+    const empty = document.createElement('p');
+    empty.className = 'muted';
+    empty.textContent = current ? 'Align the active object onto a reference using matching Cα/P backbone atoms.' : 'Load two structures to compare them.';
+    $('alignment-result').append(empty);
+  }
+}
+
 function syncStructure() {
   const current = activeObject();
   const summary = current?.summary;
@@ -333,6 +438,7 @@ function syncStructure() {
   syncExplore();
   syncNamedSelections();
   syncControls();
+  syncAnalysis();
 }
 
 async function openStructure(read, info, format) {
@@ -351,6 +457,8 @@ async function openStructure(read, info, format) {
       id, ...info, format, summary: prepared.summary, atoms: prepared.atoms,
       title: info.title || info.name,
       description: info.description || structureDescription(text, format),
+      originalCoordinates: prepared.atoms.map(atom => ({ x: atom.x, y: atom.y, z: atom.z })),
+      alignment: null,
       history: new DisplayHistory(defaultDisplay(prepared.summary.hasBackbone)),
     };
     renderer.add(id, prepared);
@@ -450,6 +558,40 @@ function isolateLigand(key) {
 function selectAtom(id, atom) {
   const object = objectById(id);
   if (!object) return;
+  if (measurementMode) {
+    const descriptor = { objectId: id, atomIndex: atom.__workspaceIndex };
+    if (measurementDraft.some(point => point.objectId === id && point.atomIndex === descriptor.atomIndex)) {
+      notice('Choose a different atom for this measurement.', true);
+      return;
+    }
+    measurementDraft.push(descriptor);
+    const required = requiredMeasurementAtoms[measurementMode];
+    if (measurementDraft.length === required) {
+      const pickedAtoms = measurementDraft.map(measurementAtom);
+      try {
+        const value = measurementValue(measurementMode, pickedAtoms);
+        const completedType = measurementMode;
+        measurements.push({ id: `measurement-${nextMeasurementId++}`, type: completedType, points: structuredClone(measurementDraft) });
+        measurementMode = null;
+        measurementDraft = [];
+        renderViewer();
+        syncControls();
+        syncAnalysis();
+        record(`Measured ${completedType}: ${formatMeasurement(completedType, value)}`);
+      } catch (error) {
+        measurementDraft = [];
+        renderViewer();
+        syncControls();
+        syncAnalysis();
+        notice(error.message, true);
+      }
+    } else {
+      renderViewer();
+      syncControls();
+      syncAnalysis();
+    }
+    return;
+  }
   const key = residueKey(atom);
   const atomName = atom.atom || atom.elem || 'Atom';
   setSelection({
@@ -457,6 +599,74 @@ function selectAtom(id, atom) {
     atomSelector: Number.isFinite(atom.serial) ? { serial: atom.serial } : { index: atom.__workspaceIndex ?? atom.index },
     label: `Atom: ${atomName} ${atom.serial || (atom.__workspaceIndex ?? 0) + 1}${atom.resn ? ` · ${atom.resn} ${atom.resi}${atom.icode || ''}` : ''}`,
   }, `Selected atom ${atomName} in ${object.title}`);
+}
+
+function startMeasurement(type) {
+  if (!activeObject() || busy) return;
+  measurementMode = measurementMode === type ? null : type;
+  measurementDraft = [];
+  renderViewer();
+  syncControls();
+  syncAnalysis();
+  record(measurementMode ? `Started ${type} measurement` : `Cancelled ${type} measurement`);
+}
+
+function cancelMeasurement() {
+  if (!measurementMode && !measurementDraft.length) return;
+  measurementMode = null;
+  measurementDraft = [];
+  renderViewer();
+  syncControls();
+  syncAnalysis();
+  record('Cancelled measurement');
+}
+
+function alignActiveObject() {
+  const moving = activeObject();
+  const reference = objectById($('alignment-reference').value);
+  if (!moving || !reference || moving.id === reference.id || busy) return;
+  try {
+    const match = matchBackboneAtoms(moving.summary, reference.summary, $('alignment-moving-chain').value, $('alignment-reference-chain').value);
+    const result = refinedSuperposition(match.pairs, 2, 5);
+    const updated = renderer.transform(moving.id, result);
+    moving.atoms = updated.atoms;
+    moving.summary = updated.summary;
+    moving.alignment = {
+      referenceId: reference.id,
+      referenceTitle: reference.title,
+      movingChain: match.movingChain,
+      referenceChain: match.referenceChain,
+      identity: match.identity,
+      rmsd: result.rmsd,
+      matchedCount: result.matchedCount,
+      rejectedCount: result.rejectedCount,
+    };
+    selection = null;
+    renderViewer();
+    renderer.fit();
+    syncStructure();
+    record(`Aligned ${moving.title} onto ${reference.title} · ${result.rmsd.toFixed(3)} Å RMSD over ${result.matchedCount} atoms`);
+  } catch (error) {
+    notice(error.message || 'The structures could not be aligned.', true);
+  }
+}
+
+function resetAlignment() {
+  const current = activeObject();
+  if (!current?.alignment || busy) return;
+  try {
+    const updated = renderer.setCoordinates(current.id, current.originalCoordinates);
+    current.atoms = updated.atoms;
+    current.summary = updated.summary;
+    current.alignment = null;
+    selection = null;
+    renderViewer();
+    renderer.fit(current.id);
+    syncStructure();
+    record(`Restored original coordinates for ${current.title}`);
+  } catch (error) {
+    notice(error.message || 'The original coordinates could not be restored.', true);
+  }
 }
 
 function changeDisplay(patch, message, object = activeObject()) {
@@ -474,6 +684,8 @@ function removeObject(id) {
   const [removed] = objects.splice(index, 1);
   renderer.remove(id);
   for (let i = namedSelections.length - 1; i >= 0; i--) if (namedSelections[i].objectId === id) namedSelections.splice(i, 1);
+  for (let i = measurements.length - 1; i >= 0; i--) if (measurements[i].points.some(point => point.objectId === id)) measurements.splice(i, 1);
+  if (measurementDraft.some(point => point.objectId === id)) { measurementMode = null; measurementDraft = []; }
   if (selection?.objectId === id) selection = null;
   if (activeId === id) activeId = objects[Math.min(index, objects.length - 1)]?.id || null;
   renderViewer();
@@ -504,7 +716,7 @@ const actions = {
   'remove-active': () => { if (activeId) removeObject(activeId); },
   clear: () => {
     if (!objects.length || busy) return;
-    renderer.clear(); objects.splice(0); namedSelections.splice(0); activeId = null; selection = null; spinning = false;
+    renderer.clear(); objects.splice(0); namedSelections.splice(0); measurements.splice(0); activeId = null; selection = null; measurementMode = null; measurementDraft = []; spinning = false;
     $('notice').hidden = true; syncStructure(); record('Closed workspace');
   },
   undo: () => { const current = activeObject(); if (!busy && current?.history.undo()) { renderViewer(); syncStructure(); record(`Undo display change for ${current.title}`); } },
@@ -517,9 +729,20 @@ const actions = {
   visibility: () => { const current = activeObject(); changeDisplay({ visible: !current.history.value.visible }, `Toggled ${current.title} visibility`); },
   theme: () => applyTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'),
   inspector: () => setInspector(document.body.classList.contains('is-inspector-hidden')),
+  analysis: () => { setInspector(true); $('analysis-section').scrollIntoView({ block: 'start', behavior: 'smooth' }); },
   help: () => $('help-dialog').showModal(),
   assistant: () => $('assistant-dialog').showModal(),
   activity: () => $('activity-dialog').showModal(),
+  'cancel-measurement': cancelMeasurement,
+  'align-objects': alignActiveObject,
+  'reset-alignment': resetAlignment,
+  'clear-measurements': () => {
+    if (!measurements.length || busy) return;
+    measurements.splice(0);
+    renderViewer();
+    syncAnalysis();
+    record('Cleared all measurements');
+  },
   'dismiss-notice': () => { $('notice').hidden = true; },
 };
 
@@ -532,6 +755,11 @@ document.addEventListener('click', event => {
     actions[button.dataset.action]?.();
   }
   if (button.dataset.sample) openSample(button.dataset.sample);
+  if (button.dataset.measure) {
+    const menu = button.closest('details');
+    if (menu) { menu.open = false; menu.querySelector('summary').focus(); }
+    startMeasurement(button.dataset.measure);
+  }
   if (button.dataset.style) changeDisplay({ style: button.dataset.style }, `${activeObject()?.title}: ${button.textContent.trim()}`);
   if (button.dataset.objectId) selectObject(button.dataset.objectId, true);
   if (button.dataset.objectVisibility) {
@@ -556,6 +784,13 @@ document.addEventListener('click', event => {
     const index = namedSelections.findIndex(item => item.id === button.dataset.removeSelection);
     if (index >= 0) { const [removed] = namedSelections.splice(index, 1); syncNamedSelections(); record(`Deleted selection ${removed.name}`); }
   }
+  if (button.dataset.removeMeasurement) {
+    const index = measurements.findIndex(item => item.id === button.dataset.removeMeasurement);
+    if (index >= 0) {
+      const [removed] = measurements.splice(index, 1);
+      renderViewer(); syncAnalysis(); record(`Deleted ${removed.type} measurement`);
+    }
+  }
   if (button.hasAttribute('data-close-dialog')) button.closest('dialog').close();
   all('.menu[open]').forEach(menu => { if (!menu.contains(event.target)) menu.open = false; });
 });
@@ -571,6 +806,7 @@ $('color-mode').addEventListener('change', event => changeDisplay({ color: event
 });
 $('surface-opacity').addEventListener('input', event => { $('opacity-value').textContent = `${event.target.value}%`; });
 $('surface-opacity').addEventListener('change', event => changeDisplay({ opacity: Number(event.target.value) / 100 }, `${activeObject().title} opacity: ${event.target.value}%`));
+$('alignment-reference').addEventListener('change', syncAnalysis);
 $('chain-select').addEventListener('change', event => {
   if (!event.target.value) setSelection(null, 'Cleared chain selection');
   else setSelection({ objectId: activeId, kind: 'chain', chain: event.target.value, primaryKeys: [], secondaryKeys: [], label: `Chain ${event.target.value}` }, `Selected chain ${event.target.value} in ${activeObject().title}`);
@@ -630,6 +866,7 @@ document.addEventListener('keydown', event => {
   if (editing || event.altKey) return;
   if (key === 'f') { event.preventDefault(); actions.fit(); }
   if (key === 'r') { event.preventDefault(); actions.spin(); }
+  if (key === 'm') { event.preventDefault(); startMeasurement('distance'); }
   if (event.target === $('viewer') && objects.length && !busy) {
     const pans = { ArrowLeft: [-20, 0], ArrowRight: [20, 0], ArrowUp: [0, -20], ArrowDown: [0, 20] };
     if (pans[event.key]) { event.preventDefault(); renderer.pan(...pans[event.key]); }
