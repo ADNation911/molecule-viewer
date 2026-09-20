@@ -205,6 +205,55 @@ dialog > p { font-size: 12px; line-height: 1.85; }
 .activity-list li { padding: 12px 0; border-bottom: 1px solid var(--border); font-size: 12px; display: flex; align-items: baseline; gap: 15px; line-height: 1.6; }
 .activity-list time { font: 10px monospace; color: var(--muted); white-space: nowrap; }
 
+/* Phase 2 object workspace and molecular exploration */
+.object-list { display: grid; gap: 6px; max-height: 210px; overflow: auto; scrollbar-width: thin; }
+.object-empty { font-size: 10px; padding: 12px 7px; border: 1px dashed var(--border); border-radius: 7px; text-align: center; }
+.object-card { display: grid; grid-template-columns: minmax(0, 1fr) 26px 26px; gap: 3px; align-items: center; border: 1px solid transparent; border-radius: 8px; padding: 3px; }
+.object-card:hover { background: var(--soft); }
+.object-card.is-active { border-color: var(--selected-border); background: var(--selected); }
+.object-select { border: 0; background: transparent; min-width: 0; justify-content: flex-start; padding: 6px 4px; text-align: left; }
+.object-select > span:nth-child(2) { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.object-select strong, .object-select small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.object-select strong { font-size: 10.5px; font-weight: 650; }
+.object-select small { font-size: 8.5px; color: var(--muted); }
+.object-color { width: 7px; height: 24px; border-radius: 4px; background: var(--accent); flex-shrink: 0; }
+.object-icon { border: 0; background: transparent; color: var(--muted); width: 25px; height: 25px; padding: 0; border-radius: 5px; }
+.object-icon:hover { background: var(--panel); color: var(--text); }
+.pdb-fetch { margin-top: 16px; padding-top: 15px; border-top: 1px solid var(--border); }
+.pdb-fetch label { display: block; font-size: 10px; font-weight: 600; margin-bottom: 7px; }
+.pdb-fetch > div { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 5px; }
+.pdb-fetch input, .selection-form input { min-width: 0; width: 100%; border: 1px solid var(--border); border-radius: 6px; background: var(--panel); color: var(--text); padding: 8px; font-size: 11px; }
+.pdb-fetch .button, .selection-form .button { min-height: 32px; padding: 6px 9px; }
+.pdb-fetch > span { display: block; color: var(--muted); font-size: 8.5px; margin-top: 6px; }
+.exploration-section .section-heading .text-button { font-size: 9px; }
+.explore-subheading { display: flex; align-items: center; justify-content: space-between; margin: 19px 0 9px; font-size: 10px; font-weight: 650; }
+.sequence-view { max-height: 225px; overflow: auto; border: 1px solid var(--border); background: var(--soft); border-radius: 7px; padding: 7px; scrollbar-width: thin; }
+.sequence-view > .muted, .ligand-list > .muted { font-size: 9.5px; padding: 6px; }
+.sequence-chain + .sequence-chain { margin-top: 8px; }
+.sequence-chain-heading { border: 0; background: none; padding: 3px; color: var(--muted); font-size: 9px; font-weight: 650; }
+.sequence-chain-heading:hover { color: var(--accent); }
+.sequence-tokens { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 4px; }
+.residue-token { width: 22px; height: 22px; padding: 0; border: 1px solid var(--border); border-radius: 4px; background: var(--panel); font: 9px ui-monospace, SFMono-Regular, Consolas, monospace; color: var(--text); }
+.residue-token:hover, .residue-token.is-selected { background: #fff0c8; border-color: #e2bd59; color: #684a00; }
+.residue-token.is-neighbor { background: var(--selected); border-color: var(--accent); color: var(--accent); }
+.ligand-list { display: grid; gap: 5px; max-height: 145px; overflow: auto; scrollbar-width: thin; }
+.ligand-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 5px; align-items: center; }
+.ligand-row > button:first-child { justify-content: flex-start; border: 1px solid var(--border); border-radius: 6px; background: var(--panel); padding: 7px; font-size: 9.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ligand-row .text-button { font-size: 8.5px; }
+.selection-detail { margin-top: 14px; padding: 11px; border-radius: 7px; background: var(--soft); display: flex; flex-direction: column; gap: 5px; font-size: 9.5px; }
+.selection-detail > strong { font-size: 10px; line-height: 1.5; }
+.selection-detail > span { color: var(--muted); text-transform: capitalize; }
+.atom-list { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; max-height: 88px; overflow: auto; }
+.atom-list button { border: 1px solid var(--border); background: var(--panel); border-radius: 4px; padding: 5px; font-size: 8.5px; }
+.selection-form { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; margin-top: 13px; }
+.named-selection-list { display: grid; gap: 5px; margin-top: 12px; }
+.named-selection-list > .muted { font-size: 9.5px; }
+.named-selection-row { display: grid; grid-template-columns: minmax(0, 1fr) 25px; align-items: center; gap: 4px; }
+.named-selection-row > button:first-child { border: 1px solid var(--border); background: var(--panel); border-radius: 6px; padding: 7px; display: flex; flex-direction: column; align-items: flex-start; gap: 3px; min-width: 0; }
+.named-selection-row strong, .named-selection-row small { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.named-selection-row strong { font-size: 9.5px; }
+.named-selection-row small { font-size: 8px; color: var(--muted); }
+
 @media (min-width: 1450px) {
   .toolbar-label { display: block; }
   .style-options button { font-size: 11px; padding: 7px 11px; }
@@ -249,7 +298,9 @@ dialog > p { font-size: 12px; line-height: 1.85; }
   .menu-popover { width: 235px; left: -40px; }
   .app-layout, .is-inspector-hidden .app-layout { height: auto; min-height: calc(100dvh - 62px); grid-template-columns: minmax(0, 1fr); }
   .library-panel { grid-row: 2; border-right: 0; border-top: 1px solid var(--border); padding: 22px 17px; }
-  .library-heading, .library-current, .library-hint, .library-panel > .open-button, .library-bottom { display: none; }
+  .library-heading, .library-hint, .library-panel > .open-button, .library-bottom { display: none; }
+  .object-list { max-height: none; margin-bottom: 12px; }
+  .pdb-fetch { margin-top: 8px; }
   .library-panel > .section-heading { margin-top: 0; }
   .sample-list { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 13px; }
   .sample-card { flex-direction: column; padding: 11px 8px; gap: 7px; }

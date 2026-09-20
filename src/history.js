@@ -28,5 +28,5 @@ export class DisplayHistory {
 }
 
 export function defaultDisplay(hasBackbone = true) {
-  return { style: hasBackbone ? 'cartoon' : 'ballstick', color: hasBackbone ? 'chain' : 'element', visible: true, water: true, labels: false, opacity: .8, hiddenResidues: [] };
+  return { style: hasBackbone ? 'cartoon' : 'ballstick', color: hasBackbone ? 'chain' : 'element', visible: true, water: true, ligands: true, labels: false, opacity: .9, hiddenResidues: [], isolateKeys: [] };
 }
