@@ -11,6 +11,7 @@ import { samples } from './samples.js';
 import {
   measurementValue, formatMeasurement, matchBackboneAtoms, refinedSuperposition,
 } from './analysis.js';
+import { setupAssistant } from './assistant.js';
 
 const $ = id => document.getElementById(id);
 const all = selector => [...document.querySelectorAll(selector)];
@@ -903,3 +904,4 @@ try {
   notice('The 3D viewer could not start. Enable WebGL / hardware acceleration in your browser, then reload.', true);
 }
 syncStructure();
+setupAssistant({ onRecord: record });

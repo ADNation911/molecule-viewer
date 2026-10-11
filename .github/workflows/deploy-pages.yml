@@ -25,10 +25,16 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
       - name: Install dependencies
         run: npm ci
       - name: Run tests
         run: npm test
+      - name: Run RAG logic tests
+        run: python -m unittest tests.test_rag -v
       - name: Build production site
         run: npm run build
       - name: Configure Pages

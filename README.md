@@ -1,6 +1,6 @@
 # Molecule3D
 
-A browser workspace for exploring molecular structures. The current local development release supports multiple independently styled objects, sequence and ligand exploration, geometric measurements, backbone alignment, validated local imports, and RCSB PDB fetching.
+A browser workspace for exploring molecular structures. The current local development release supports multiple independently styled objects, sequence and ligand exploration, geometric measurements, backbone alignment, validated local imports, RCSB PDB fetching, and a source-grounded local biotech assistant.
 
 ## Run locally
 
@@ -34,12 +34,13 @@ Stop the dev server before starting preview: both use port 5173. Preview serves 
 - Undo/redo for the active object's display settings. Camera movements are independent.
 - Drag rotation, right-drag pan, scroll/button zoom, fit, opt-in auto-rotation, keyboard shortcuts.
 - Resizable/collapsible inspector, light/dark theme, helpful empty/error states and session activity log.
+- Local Qwen3 assistant restricted to molecular science and biotechnology, with Europe PMC retrieval, Nomic embeddings, inline citations, and inspectable source cards.
 
-Files are read locally; the app does not send structure contents to a server or call a model provider. The assistant is visibly unavailable until the later RAG release. The chosen direction is a free, open-source model, with hardware and hosting requirements to be determined later.
+Files are read locally and structure contents are not sent to the assistant. When enabled, assistant questions are sent to the local Python backend, literature searches go to Europe PMC, and generation and embedding run through the local Ollama service. No model-provider API key or paid subscription is required. Follow [the local RAG setup](docs/RAG_SETUP.md) to enable it.
 
 ## Limits
 
-Each file may be up to 10 MB and 75,000 atoms; the combined workspace limit is 120,000 atoms. Surface generation is limited to 15,000 atoms per object. Only the first model/SDF record from each file is displayed. Cartoon and ribbon are unavailable without a supported backbone. Missing residue/chain annotations are shown as zero rather than invented. Neighbor lists are geometric proximity results, not claims about chemical bonds. Alignment uses identical residues from a global sequence alignment and one Cα or phosphate anchor per residue; its RMSD is a geometric comparison, not a claim of biological equivalence. Saving sessions and AI answers are future capabilities.
+Each file may be up to 10 MB and 75,000 atoms; the combined workspace limit is 120,000 atoms. Surface generation is limited to 15,000 atoms per object. Only the first model/SDF record from each file is displayed. Cartoon and ribbon are unavailable without a supported backbone. Missing residue/chain annotations are shown as zero rather than invented. Neighbor lists are geometric proximity results, not claims about chemical bonds. Alignment uses identical residues from a global sequence alignment and one Cα or phosphate anchor per residue; its RMSD is a geometric comparison, not a claim of biological equivalence. The assistant depends on the retrieved literature and may abstain when evidence is missing. It does not provide diagnoses or personalized treatment. Saving sessions and passing the active 3D selection into the assistant are future capabilities.
 
 3Dmol.js is pinned to 2.5.5 and Vite to 8.3.0, with a committed lockfile. The production build currently reports upstream 3Dmol warnings for its embedded-viewer callback `eval` and its 574 kB renderer bundle; the application does not use that callback path or evaluate user code. Browser UI checks must accompany build/test success.
 
@@ -50,7 +51,9 @@ Each file may be up to 10 MB and 75,000 atoms; the combined workspace limit is 1
 - `src/structures.js`: import validation, metadata and visibility selection.
 - `src/pdb.js`: PDB ID validation and RCSB fetch behavior.
 - `src/analysis.js`: measurement geometry, sequence correspondence and rigid-body superposition.
+- `src/assistant.js`: assistant connection, chat state and cited source rendering.
 - `src/history.js`: bounded, immutable display history.
+- `backend/`: scoped retrieval, Europe PMC evidence search, local embeddings and cited answer API.
 - `src/samples.js`, `public/samples/`: bundled sample catalog/data.
 - `tests/`: import and history regression checks.
 

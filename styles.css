@@ -195,12 +195,44 @@ dialog > p { font-size: 12px; line-height: 1.85; }
 .shortcut-list div { display: flex; justify-content: space-between; font-size: 11px; margin: 13px 0; gap: 10px; }
 .shortcut-list dd { margin: 0; }
 .guide-note { padding: 13px; background: var(--soft); border-radius: 7px; color: var(--muted); margin-top: 20px; }
-.assistant-emblem { display: grid; place-items: center; width: 48px; height: 48px; background: var(--selected); color: var(--accent); border-radius: 12px; margin-bottom: 18px; }
-.assistant-emblem svg { width: 25px; height: 25px; }
-.assistant-preview { margin: 24px 0; padding: 20px; background: var(--soft); border: 1px solid var(--border); border-radius: 9px; }
-.assistant-preview h3 { font-size: 14px; margin: 14px 0 7px; }
-.assistant-preview p { font-size: 12px; line-height: 1.8; color: var(--muted); }
-#assistant-dialog > .button { margin-top: 23px; }
+#assistant-dialog { width: min(760px, calc(100vw - 32px)); height: min(760px, calc(100dvh - 48px)); overflow: hidden; padding: 0; grid-template-rows: auto auto minmax(180px, 1fr) auto auto; }
+#assistant-dialog[open] { display: grid; }
+#assistant-dialog .dialog-heading { margin: 0; padding: 23px 25px 17px; border-bottom: 1px solid var(--border); }
+#assistant-dialog .dialog-heading h2 { margin: 5px 0 0; font-size: 21px; }
+.assistant-status-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 9px 25px; background: var(--soft); border-bottom: 1px solid var(--border); font-size: 10px; }
+#assistant-status { display: flex; align-items: center; gap: 7px; color: var(--muted); }
+#assistant-status:before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: #a6afb3; }
+#assistant-status[data-status=ready]:before, #assistant-status-dot[data-status=ready] { background: #28a879; box-shadow: 0 0 0 3px #28a8791f; }
+#assistant-status[data-status=checking]:before, #assistant-status-dot[data-status=checking] { background: #d89a2b; animation: status-pulse 1.3s ease-in-out infinite; }
+#assistant-status[data-status=offline]:before, #assistant-status[data-status=setup]:before, #assistant-status-dot[data-status=offline], #assistant-status-dot[data-status=setup] { background: #d15b5b; }
+@keyframes status-pulse { 50% { opacity: .35; } }
+.assistant-messages { overflow: auto; padding: 20px 25px; display: flex; flex-direction: column; gap: 13px; background: color-mix(in srgb, var(--soft) 35%, var(--panel)); scrollbar-width: thin; }
+.assistant-message { max-width: 88%; padding: 12px 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--panel); align-self: flex-start; }
+.assistant-message.is-user { align-self: flex-end; background: var(--selected); border-color: var(--selected-border); }
+.assistant-message[data-disposition=declined], .assistant-message[data-disposition=insufficient], .assistant-message[data-disposition=error] { border-color: var(--notice-border); background: var(--notice); }
+.assistant-message-label { display: block; color: var(--accent); font-size: 8px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; margin-bottom: 6px; }
+.assistant-message p { white-space: pre-wrap; font-size: 11.5px; line-height: 1.75; }
+.assistant-message.is-pending { opacity: .65; }
+.assistant-sources { display: grid; gap: 7px; margin: 2px 0 8px; }
+.assistant-sources h3 { font-size: 9px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+.assistant-source-card { display: grid; grid-template-columns: 31px minmax(0, 1fr); gap: 10px; padding: 11px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); color: var(--text); text-decoration: none; }
+.assistant-source-card:hover { border-color: var(--selected-border); background: var(--selected); }
+.source-number { display: grid; place-items: center; align-self: start; height: 25px; border-radius: 5px; background: var(--selected); color: var(--accent); font-size: 9px; font-weight: 700; }
+.assistant-source-card > span:last-child { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.assistant-source-card strong { font-size: 10.5px; line-height: 1.5; }
+.assistant-source-card small { font-size: 8.5px; color: var(--muted); }
+.source-excerpt { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; font-size: 9px; line-height: 1.55; color: var(--muted); }
+.assistant-form { padding: 16px 25px; border-top: 1px solid var(--border); }
+.assistant-form > label, .assistant-settings label { display: block; font-size: 9px; font-weight: 650; margin-bottom: 7px; color: var(--muted); }
+.assistant-form textarea, .assistant-settings input { width: 100%; resize: vertical; min-height: 68px; border: 1px solid var(--border); border-radius: 7px; padding: 10px; background: var(--panel); color: var(--text); font: inherit; font-size: 11.5px; line-height: 1.5; }
+.assistant-form textarea:focus, .assistant-settings input:focus { outline: 2px solid var(--selected-border); outline-offset: 1px; }
+.assistant-form > div { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-top: 9px; }
+.assistant-form > div > span { color: var(--muted); font-size: 8.5px; line-height: 1.5; }
+.assistant-settings { padding: 10px 25px 16px; border-top: 1px solid var(--border); }
+.assistant-settings summary { cursor: pointer; color: var(--muted); font-size: 9px; }
+.assistant-settings label { margin-top: 12px; }
+.assistant-settings input { min-height: 0; resize: none; padding: 8px; }
+.assistant-settings p { color: var(--muted); font-size: 8.5px; line-height: 1.55; margin-top: 8px; }
 .activity-list { list-style: none; padding: 0; margin-top: 25px; }
 .activity-list li { padding: 12px 0; border-bottom: 1px solid var(--border); font-size: 12px; display: flex; align-items: baseline; gap: 15px; line-height: 1.6; }
 .activity-list time { font: 10px monospace; color: var(--muted); white-space: nowrap; }
@@ -356,6 +388,10 @@ dialog > p { font-size: 12px; line-height: 1.85; }
   .guide-grid h3 { margin: 8px 0; }
   .guide-grid p { font-size: 12px; }
   dialog { padding: 21px; }
+  #assistant-dialog { height: calc(100dvh - 18px); width: calc(100vw - 18px); padding: 0; }
+  #assistant-dialog .dialog-heading, .assistant-messages, .assistant-form { padding-left: 16px; padding-right: 16px; }
+  .assistant-status-row, .assistant-settings { padding-left: 16px; padding-right: 16px; }
+  .assistant-message { max-width: 96%; }
   .workspace-status, .workspace-status .text-button { font-size: 9px; }
 }
 @media (prefers-reduced-motion: reduce) {

@@ -54,7 +54,7 @@ Maintain an ingestion manifest with source hashes. Re-import changed sources, sk
 
 The selected direction is a free, open-source stack. Build a small Python backend with a local or self-hosted answer model, open-source embeddings, and a self-managed index. Start with one deployment path so the first RAG release remains testable and maintainable.
 
-The initial candidates to benchmark in Part 4 are a compact instruction model served through Ollama or llama.cpp, a sentence-transformers embedding model suited to scientific text, and FAISS or Qdrant for hybrid retrieval. Select exact models only after measuring answer quality, memory use, latency, license terms, and the hardware available for hosting. “Free model” removes per-request model fees but does not remove compute or hosting requirements.
+The first local implementation uses the Apache-2.0 `qwen3:4b` instruction model and `nomic-embed-text` through Ollama. It retrieves biomedical titles and abstracts from Europe PMC on each question, ranks them with local embeddings, and supplies the strongest evidence to the answer model. A persistent vector database remains useful when a reviewed local corpus is added. “Free model” removes per-request model fees but does not remove compute, network, or public hosting requirements.
 
 Suggested backend contracts:
 
