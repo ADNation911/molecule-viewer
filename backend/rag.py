@@ -9,10 +9,11 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import asdict, dataclass
-from typing import Any, Iterable
+from typing import Any, Iterable, Protocol
 
 
 OLLAMA_URL = "http://127.0.0.1:11434"
+CLOUDFLARE_API_URL = "https://api.cloudflare.com/client/v4/accounts"
 EUROPE_PMC_URL = "https://www.ebi.ac.uk/europepmc/webservices/rest/search"
 
 DOMAIN_TERMS = re.compile(
@@ -46,6 +47,18 @@ SEARCH_STOPWORDS = {
 
 class RagError(RuntimeError):
     """An expected assistant-service failure suitable for a user-facing message."""
+
+
+class InferenceProvider(Protocol):
+    """The small inference surface needed by the retrieval pipeline."""
+
+    name: str
+    chat_model: str
+    embed_model: str
+
+    def health(self) -> dict[str, Any]: ...
+    def generate_json(self, messages: list[dict[str, str]], schema: dict[str, Any]) -> dict[str, Any]: ...
+    def embed(self, texts: list[str]) -> list[list[float]]: ...
 
 
 @dataclass(frozen=True)
@@ -118,9 +131,17 @@ def _clean_text(value: str | None, limit: int = 3200) -> str:
     return cleaned[:limit]
 
 
-def _request_json(url: str, *, payload: dict[str, Any] | None = None, timeout: int = 45) -> dict[str, Any]:
+def _request_json(
+    url: str,
+    *,
+    payload: dict[str, Any] | None = None,
+    timeout: int = 45,
+    headers: dict[str, str] | None = None,
+) -> dict[str, Any]:
     data = None if payload is None else json.dumps(payload).encode("utf-8")
-    request = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json", "User-Agent": "Molecule3D/0.2"})
+    request_headers = {"Content-Type": "application/json", "User-Agent": "Molecule3D/0.3"}
+    request_headers.update(headers or {})
+    request = urllib.request.Request(url, data=data, headers=request_headers)
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
             return json.loads(response.read().decode("utf-8"))
@@ -150,7 +171,90 @@ def _ollama_chat(messages: list[dict[str, str]], model: str, ollama_url: str = O
     return strip_model_reasoning(response.get("message", {}).get("content", ""))
 
 
-def classify_scope(question: str, model: str, ollama_url: str = OLLAMA_URL) -> bool:
+class OllamaProvider:
+    name = "local Ollama"
+
+    def __init__(self, chat_model: str, embed_model: str, host: str = OLLAMA_URL):
+        self.chat_model = chat_model
+        self.embed_model = embed_model
+        self.host = host.rstrip("/")
+
+    def health(self) -> dict[str, Any]:
+        models = ollama_models(self.host)
+        missing = [
+            model for model in (self.chat_model, self.embed_model)
+            if model not in models and f"{model}:latest" not in models
+        ]
+        return {"status": "ready" if not missing else "setup_required", "missing_models": missing}
+
+    def generate_json(self, messages: list[dict[str, str]], schema: dict[str, Any]) -> dict[str, Any]:
+        try:
+            return json.loads(_ollama_chat(messages, self.chat_model, self.host, schema))
+        except json.JSONDecodeError as error:
+            raise RagError("The local model returned an invalid structured answer.") from error
+
+    def embed(self, texts: list[str]) -> list[list[float]]:
+        return embed_texts(texts, self.embed_model, self.host)
+
+
+class CloudflareProvider:
+    name = "Cloudflare Workers AI"
+
+    def __init__(self, account_id: str, api_token: str, chat_model: str, embed_model: str):
+        self.account_id = account_id.strip()
+        self.api_token = api_token.strip()
+        self.chat_model = chat_model
+        self.embed_model = embed_model
+        self.base_url = f"{CLOUDFLARE_API_URL}/{urllib.parse.quote(self.account_id, safe='')}/ai/run"
+
+    def _run(self, model: str, payload: dict[str, Any], timeout: int = 90) -> Any:
+        if not self.account_id or not self.api_token:
+            raise RagError("Cloudflare Workers AI is not configured on the server.")
+        response = _request_json(
+            f"{self.base_url}/{model}",
+            payload=payload,
+            timeout=timeout,
+            headers={"Authorization": f"Bearer {self.api_token}"},
+        )
+        if response.get("success") is not True:
+            messages = response.get("errors") or response.get("messages") or []
+            detail = messages[0].get("message", "Cloudflare inference failed.") if messages and isinstance(messages[0], dict) else "Cloudflare inference failed."
+            raise RagError(detail)
+        return response.get("result", {})
+
+    def health(self) -> dict[str, Any]:
+        if not self.account_id or not self.api_token:
+            return {"status": "setup_required", "missing_configuration": [
+                key for key, value in (("CLOUDFLARE_ACCOUNT_ID", self.account_id), ("CLOUDFLARE_API_TOKEN", self.api_token)) if not value
+            ]}
+        return {"status": "ready", "missing_configuration": []}
+
+    def generate_json(self, messages: list[dict[str, str]], schema: dict[str, Any]) -> dict[str, Any]:
+        result = self._run(self.chat_model, {
+            "messages": messages,
+            "temperature": 0.1,
+            "max_tokens": 650,
+            "response_format": {"type": "json_schema", "json_schema": schema},
+        })
+        content = result.get("response") if isinstance(result, dict) else None
+        if isinstance(content, dict):
+            return content
+        if isinstance(content, str):
+            try:
+                return json.loads(strip_model_reasoning(content))
+            except json.JSONDecodeError as error:
+                raise RagError("The hosted model returned an invalid structured answer.") from error
+        raise RagError("The hosted model returned an empty structured answer.")
+
+    def embed(self, texts: list[str]) -> list[list[float]]:
+        result = self._run(self.embed_model, {"text": texts, "pooling": "cls"})
+        embeddings = result.get("data", []) if isinstance(result, dict) else []
+        if len(embeddings) != len(texts):
+            raise RagError("The hosted embedding model returned an incomplete result.")
+        return embeddings
+
+
+def classify_scope(question: str, provider: InferenceProvider) -> bool:
     hint = scope_hint(question)
     if hint != "classify":
         return hint == "allow"
@@ -168,9 +272,9 @@ def classify_scope(question: str, model: str, ollama_url: str = OLLAMA_URL) -> b
         f"<question>{question}</question>\n/no_think"
     )
     try:
-        result = json.loads(_ollama_chat([{"role": "user", "content": prompt}], model, ollama_url, schema))
+        result = provider.generate_json([{"role": "user", "content": prompt}], schema)
         return result.get("in_scope") is True
-    except (json.JSONDecodeError, RagError):
+    except RagError:
         return False
 
 
@@ -218,17 +322,17 @@ def embed_texts(texts: list[str], model: str, ollama_url: str = OLLAMA_URL) -> l
     return embeddings
 
 
-def rank_evidence(question: str, evidence: list[Evidence], embed_model: str, ollama_url: str = OLLAMA_URL, limit: int = 5) -> list[Evidence]:
+def rank_evidence(question: str, evidence: list[Evidence], provider: InferenceProvider, limit: int = 5) -> list[Evidence]:
     if not evidence:
         return []
     inputs = [f"search_query: {question}"] + [f"search_document: {item.title}. {item.excerpt}" for item in evidence]
-    vectors = embed_texts(inputs, embed_model, ollama_url)
+    vectors = provider.embed(inputs)
     query_vector = vectors[0]
     scored = [Evidence(**{**asdict(item), "score": cosine_similarity(query_vector, vector)}) for item, vector in zip(evidence, vectors[1:])]
     return sorted(scored, key=lambda item: item.score, reverse=True)[:limit]
 
 
-def answer_from_evidence(question: str, evidence: list[Evidence], model: str, ollama_url: str = OLLAMA_URL, history: list[dict[str, str]] | None = None) -> tuple[str, list[int]]:
+def answer_from_evidence(question: str, evidence: list[Evidence], provider: InferenceProvider, history: list[dict[str, str]] | None = None) -> tuple[str, list[int]]:
     source_text = "\n\n".join(
         f"[S{index}] TITLE: {item.title}\nAUTHORS: {item.authors}\nPUBLICATION: {item.publication} ({item.year})\nEVIDENCE: {item.excerpt}"
         for index, item in enumerate(evidence, 1)
@@ -262,15 +366,10 @@ def answer_from_evidence(question: str, evidence: list[Evidence], model: str, ol
         "inline [S#] citations. Do not include analysis, planning, or commentary about writing the answer. End with a "
         "one-sentence limitation when the evidence is narrow or conflicting.\n/no_think"
     )
-    try:
-        result = json.loads(_ollama_chat(
-            [{"role": "system", "content": system}, {"role": "user", "content": user}],
-            model,
-            ollama_url,
-            schema,
-        ))
-    except json.JSONDecodeError as error:
-        raise RagError("The local model returned an invalid structured answer.") from error
+    result = provider.generate_json(
+        [{"role": "system", "content": system}, {"role": "user", "content": user}],
+        schema,
+    )
     answer = str(result.get("answer", "")).strip()
     if result.get("supported") is not True:
         return answer, []

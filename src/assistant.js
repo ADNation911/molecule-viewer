@@ -1,6 +1,12 @@
-const DEFAULT_ENDPOINT = 'http://127.0.0.1:8000';
+const configuredEndpoint = import.meta.env.VITE_RAG_API_URL?.trim();
+const browserHost = typeof window === 'undefined' ? '' : window.location.hostname;
+const browserOrigin = typeof window === 'undefined' ? '' : window.location.origin;
+const isLocalBrowser = browserHost === '127.0.0.1' || browserHost === 'localhost';
+const isViteDevelopment = isLocalBrowser && window.location.port === '5173';
+const DEFAULT_ENDPOINT = configuredEndpoint || (isViteDevelopment ? 'http://127.0.0.1:8000' : browserOrigin || 'http://127.0.0.1:8000');
 
 function endpointValue() {
+  if (configuredEndpoint) return DEFAULT_ENDPOINT;
   try { return localStorage.getItem('molecule3d-assistant-endpoint') || DEFAULT_ENDPOINT; } catch { return DEFAULT_ENDPOINT; }
 }
 
@@ -72,23 +78,24 @@ export function setupAssistant({ onRecord = () => {} } = {}) {
   }
 
   async function checkHealth() {
-    setStatus('checking', 'Checking local assistant…');
+    setStatus('checking', 'Checking assistant…');
     try {
       const response = await fetch(`${normalizedEndpoint(endpointInput.value)}/api/health`, { signal: AbortSignal.timeout(5000) });
       if (!response.ok) throw new Error('Health check failed');
       const health = await response.json();
       if (health.status === 'ready') {
-        setStatus('ready', `${health.chat_model} · local and ready`);
+        setStatus('ready', `${health.chat_model} · ${health.provider || 'ready'}`);
         submit.disabled = false;
       } else if (health.status === 'setup_required') {
-        setStatus('setup', `Install: ${health.missing_models.join(', ')}`);
+        const missing = health.missing_models || health.missing_configuration || [];
+        setStatus('setup', `Setup required: ${missing.join(', ')}`);
         submit.disabled = true;
       } else {
-        setStatus('offline', 'Local assistant is unavailable');
+        setStatus('offline', 'Assistant is unavailable');
         submit.disabled = true;
       }
     } catch {
-      setStatus('offline', 'Start the local RAG server to ask questions');
+      setStatus('offline', 'The assistant server is offline');
       submit.disabled = true;
     }
   }
@@ -134,8 +141,8 @@ export function setupAssistant({ onRecord = () => {} } = {}) {
       setStatus('ready', payload.disposition === 'answered' ? `${payload.sources.length} cited source${payload.sources.length === 1 ? '' : 's'}` : 'Ready for a molecule question');
       onRecord(payload.disposition === 'answered' ? `Assistant answered with ${payload.sources.length} cited sources` : 'Assistant declined or lacked evidence');
     } catch (error) {
-      pending.replaceWith(createMessage('assistant', error.message || 'The local assistant could not answer.', 'error'));
-      setStatus('offline', 'Assistant request failed · check the local server');
+      pending.replaceWith(createMessage('assistant', error.message || 'The assistant could not answer.', 'error'));
+      setStatus('offline', 'Assistant request failed · check the server');
     } finally {
       working = false;
       submit.disabled = status.dataset.status !== 'ready';

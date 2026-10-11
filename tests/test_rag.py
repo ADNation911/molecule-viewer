@@ -1,6 +1,15 @@
 import unittest
+from unittest.mock import patch
 
-from backend.rag import Evidence, build_search_query, cited_source_indexes, cosine_similarity, scope_hint, strip_model_reasoning
+from backend.rag import (
+    CloudflareProvider,
+    Evidence,
+    build_search_query,
+    cited_source_indexes,
+    cosine_similarity,
+    scope_hint,
+    strip_model_reasoning,
+)
 
 
 class ScopeTests(unittest.TestCase):
@@ -40,6 +49,43 @@ class RetrievalTests(unittest.TestCase):
         source = Evidence("id", "Title", "Excerpt", "Author", "Journal", "2024", "https://example.test", score=0.123456)
         self.assertEqual(source.public("S1")["label"], "S1")
         self.assertEqual(source.public("S1")["score"], 0.1235)
+
+
+class CloudflareProviderTests(unittest.TestCase):
+    def setUp(self):
+        self.provider = CloudflareProvider(
+            "account-123",
+            "secret-token",
+            "@cf/meta/llama-3.1-8b-instruct",
+            "@cf/baai/bge-base-en-v1.5",
+        )
+
+    def test_health_checks_configuration_without_spending_inference(self):
+        self.assertEqual(self.provider.health()["status"], "ready")
+        missing = CloudflareProvider("", "", "chat", "embed").health()
+        self.assertEqual(missing["status"], "setup_required")
+        self.assertEqual(missing["missing_configuration"], ["CLOUDFLARE_ACCOUNT_ID", "CLOUDFLARE_API_TOKEN"])
+
+    @patch("backend.rag._request_json")
+    def test_structured_generation_keeps_token_in_authorization_header(self, request_json):
+        request_json.return_value = {"success": True, "result": {"response": {"in_scope": True}}}
+        schema = {"type": "object", "properties": {"in_scope": {"type": "boolean"}}}
+
+        result = self.provider.generate_json([{"role": "user", "content": "BRCA1"}], schema)
+
+        self.assertEqual(result, {"in_scope": True})
+        _, kwargs = request_json.call_args
+        self.assertEqual(kwargs["headers"], {"Authorization": "Bearer secret-token"})
+        self.assertEqual(kwargs["payload"]["response_format"]["json_schema"], schema)
+
+    @patch("backend.rag._request_json")
+    def test_embedding_response_is_unwrapped(self, request_json):
+        request_json.return_value = {"success": True, "result": {"data": [[1.0, 0.0], [0.0, 1.0]]}}
+
+        vectors = self.provider.embed(["one", "two"])
+
+        self.assertEqual(vectors, [[1.0, 0.0], [0.0, 1.0]])
+        self.assertEqual(request_json.call_args.kwargs["payload"], {"text": ["one", "two"], "pooling": "cls"})
 
 
 if __name__ == "__main__":

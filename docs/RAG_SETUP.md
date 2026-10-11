@@ -1,6 +1,6 @@
 # Run the local biotech assistant
 
-Molecule3D's assistant uses two models through Ollama:
+Molecule3D's local assistant uses two models through Ollama:
 
 - `qwen3:4b` generates answers. It is an Apache-2.0 model and the Ollama download is about 2.5 GB.
 - `nomic-embed-text` ranks biomedical evidence locally. Its Ollama download is about 274 MB.
@@ -50,7 +50,7 @@ The first response should contain inline `[S#]` citations and source cards. The 
 
 ## Configuration
 
-The defaults can be changed with environment variables before starting Uvicorn:
+The local defaults can be changed with environment variables before starting Uvicorn:
 
 ```powershell
 $env:MOLECULE3D_CHAT_MODEL = "qwen3:4b"
@@ -58,13 +58,13 @@ $env:MOLECULE3D_EMBED_MODEL = "nomic-embed-text"
 $env:OLLAMA_HOST = "http://127.0.0.1:11434"
 ```
 
-The frontend stores only the selected backend URL in browser storage. Conversation context is held in backend memory and disappears when the server stops. Questions are limited to 1,200 characters and 15 requests per minute per client.
+The frontend stores only the selected backend URL in browser storage. Conversation context is held in backend memory and disappears when the server stops. Questions are limited to 1,200 characters and the default rate limit is 10 requests per minute per client.
 
 ## Public deployment
 
-GitHub Pages can host the static viewer, but it cannot run Python or Ollama. A public assistant therefore needs the same backend and models on a separate HTTPS server. Enter that server's HTTPS URL under **Assistant → Connection settings**. Add the deployed frontend origin to `allow_origins` in `backend/app.py` before exposing the API.
+GitHub Pages cannot run the Python API or an Ollama process. The included Render deployment runs the built frontend and FastAPI together, and calls open-weight models through Cloudflare Workers AI. Follow [Deploy Molecule3D publicly](DEPLOY_RENDER.md).
 
-Do not commit API keys. This local stack does not require one.
+Do not commit API keys. The local Ollama stack does not require one, and the public Cloudflare token belongs only in Render's secret environment.
 
 ## Verification
 

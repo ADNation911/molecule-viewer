@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: molecule3d
+    runtime: docker
+    plan: free
+    healthCheckPath: /api/health
+    envVars:
+      - key: MOLECULE3D_INFERENCE_PROVIDER
+        value: cloudflare
+      - key: MOLECULE3D_CHAT_MODEL
+        value: "@cf/meta/llama-3.1-8b-instruct"
+      - key: MOLECULE3D_EMBED_MODEL
+        value: "@cf/baai/bge-base-en-v1.5"
+      - key: MOLECULE3D_RATE_LIMIT
+        value: "10"
+      - key: CLOUDFLARE_ACCOUNT_ID
+        sync: false
+      - key: CLOUDFLARE_API_TOKEN
+        sync: false

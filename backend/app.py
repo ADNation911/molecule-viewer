@@ -4,39 +4,58 @@ import asyncio
 import os
 import time
 import uuid
-from collections import defaultdict, deque
+from collections import OrderedDict, defaultdict, deque
+from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from .rag import (
+    CloudflareProvider,
     OLLAMA_URL,
+    OllamaProvider,
     RagError,
     answer_from_evidence,
     classify_scope,
-    ollama_models,
     rank_evidence,
     search_europe_pmc,
 )
 
 
-CHAT_MODEL = os.getenv("MOLECULE3D_CHAT_MODEL", "qwen3:4b")
-EMBED_MODEL = os.getenv("MOLECULE3D_EMBED_MODEL", "nomic-embed-text")
-OLLAMA_HOST = os.getenv("OLLAMA_HOST", OLLAMA_URL)
-if not OLLAMA_HOST.startswith(("http://", "https://")):
-    OLLAMA_HOST = f"http://{OLLAMA_HOST}"
-MAX_HISTORY = 6
+PROVIDER_KIND = os.getenv("MOLECULE3D_INFERENCE_PROVIDER", "ollama").strip().lower()
+if PROVIDER_KIND == "cloudflare":
+    CHAT_MODEL = os.getenv("MOLECULE3D_CHAT_MODEL", "@cf/meta/llama-3.1-8b-instruct")
+    EMBED_MODEL = os.getenv("MOLECULE3D_EMBED_MODEL", "@cf/baai/bge-base-en-v1.5")
+    provider = CloudflareProvider(
+        os.getenv("CLOUDFLARE_ACCOUNT_ID", ""),
+        os.getenv("CLOUDFLARE_API_TOKEN", ""),
+        CHAT_MODEL,
+        EMBED_MODEL,
+    )
+elif PROVIDER_KIND == "ollama":
+    CHAT_MODEL = os.getenv("MOLECULE3D_CHAT_MODEL", "qwen3:4b")
+    EMBED_MODEL = os.getenv("MOLECULE3D_EMBED_MODEL", "nomic-embed-text")
+    OLLAMA_HOST = os.getenv("OLLAMA_HOST", OLLAMA_URL)
+    if not OLLAMA_HOST.startswith(("http://", "https://")):
+        OLLAMA_HOST = f"http://{OLLAMA_HOST}"
+    provider = OllamaProvider(CHAT_MODEL, EMBED_MODEL, OLLAMA_HOST)
+else:
+    raise RuntimeError("MOLECULE3D_INFERENCE_PROVIDER must be 'ollama' or 'cloudflare'.")
 
-app = FastAPI(title="Molecule3D local RAG", version="0.1.0")
+DEFAULT_ORIGINS = "http://127.0.0.1:5173,http://localhost:5173,https://adnation911.github.io"
+ALLOWED_ORIGINS = [origin.strip().rstrip("/") for origin in os.getenv("MOLECULE3D_ALLOWED_ORIGINS", DEFAULT_ORIGINS).split(",") if origin.strip()]
+RATE_LIMIT_PER_MINUTE = max(1, int(os.getenv("MOLECULE3D_RATE_LIMIT", "10")))
+MAX_HISTORY = 6
+MAX_CONVERSATIONS = max(10, int(os.getenv("MOLECULE3D_MAX_CONVERSATIONS", "500")))
+MAX_CACHED_SOURCES = max(50, int(os.getenv("MOLECULE3D_MAX_CACHED_SOURCES", "1000")))
+
+app = FastAPI(title="Molecule3D RAG", version="0.2.0")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://127.0.0.1:5173",
-        "http://localhost:5173",
-        "https://adnation911.github.io",
-    ],
+    allow_origins=ALLOWED_ORIGINS,
     allow_methods=["GET", "POST"],
     allow_headers=["Content-Type"],
 )
@@ -47,9 +66,26 @@ class ChatRequest(BaseModel):
     conversation_id: str | None = Field(default=None, max_length=80)
 
 
-conversations: dict[str, deque[dict[str, str]]] = defaultdict(lambda: deque(maxlen=MAX_HISTORY))
-source_cache: dict[str, dict[str, Any]] = {}
+conversations: OrderedDict[str, deque[dict[str, str]]] = OrderedDict()
+source_cache: OrderedDict[str, dict[str, Any]] = OrderedDict()
 requests_by_ip: dict[str, deque[float]] = defaultdict(deque)
+
+
+def _conversation(conversation_id: str) -> deque[dict[str, str]]:
+    history = conversations.pop(conversation_id, None)
+    if history is None:
+        history = deque(maxlen=MAX_HISTORY)
+    conversations[conversation_id] = history
+    while len(conversations) > MAX_CONVERSATIONS:
+        conversations.popitem(last=False)
+    return history
+
+
+def _cache_source(source: dict[str, Any]) -> None:
+    source_cache.pop(source["id"], None)
+    source_cache[source["id"]] = source
+    while len(source_cache) > MAX_CACHED_SOURCES:
+        source_cache.popitem(last=False)
 
 
 def _check_rate_limit(ip: str) -> None:
@@ -57,7 +93,7 @@ def _check_rate_limit(ip: str) -> None:
     window = requests_by_ip[ip]
     while window and now - window[0] > 60:
         window.popleft()
-    if len(window) >= 15:
+    if len(window) >= RATE_LIMIT_PER_MINUTE:
         raise HTTPException(status_code=429, detail="Please wait a moment before asking another question.")
     window.append(now)
 
@@ -65,26 +101,27 @@ def _check_rate_limit(ip: str) -> None:
 @app.get("/api/health")
 async def health() -> dict[str, Any]:
     try:
-        models = await asyncio.to_thread(ollama_models, OLLAMA_HOST)
+        result = await asyncio.to_thread(provider.health)
     except RagError as error:
-        return {"status": "unavailable", "detail": str(error), "chat_model": CHAT_MODEL, "embed_model": EMBED_MODEL}
-    missing = [model for model in (CHAT_MODEL, EMBED_MODEL) if model not in models and f"{model}:latest" not in models]
+        return {"status": "unavailable", "detail": str(error), "provider": provider.name, "chat_model": CHAT_MODEL, "embed_model": EMBED_MODEL}
     return {
-        "status": "ready" if not missing else "setup_required",
+        **result,
+        "provider": provider.name,
         "chat_model": CHAT_MODEL,
         "embed_model": EMBED_MODEL,
-        "missing_models": missing,
     }
 
 
 @app.post("/api/chat")
 async def chat(payload: ChatRequest, request: Request) -> dict[str, Any]:
-    _check_rate_limit(request.client.host if request.client else "local")
+    forwarded = request.headers.get("x-forwarded-for", "").split(",", 1)[0].strip()
+    _check_rate_limit(forwarded or (request.client.host if request.client else "local"))
     question = " ".join(payload.question.split())
     conversation_id = payload.conversation_id or str(uuid.uuid4())
-    history = list(conversations[conversation_id])
+    conversation = _conversation(conversation_id)
+    history = list(conversation)
     try:
-        in_scope = await asyncio.to_thread(classify_scope, question, CHAT_MODEL, OLLAMA_HOST)
+        in_scope = await asyncio.to_thread(classify_scope, question, provider)
         if not in_scope:
             return {
                 "conversation_id": conversation_id,
@@ -93,7 +130,7 @@ async def chat(payload: ChatRequest, request: Request) -> dict[str, Any]:
                 "sources": [],
             }
         candidates = await asyncio.to_thread(search_europe_pmc, question)
-        ranked = await asyncio.to_thread(rank_evidence, question, candidates, EMBED_MODEL, OLLAMA_HOST)
+        ranked = await asyncio.to_thread(rank_evidence, question, candidates, provider)
         if not ranked:
             return {
                 "conversation_id": conversation_id,
@@ -101,19 +138,19 @@ async def chat(payload: ChatRequest, request: Request) -> dict[str, Any]:
                 "answer": "I could not find enough citable biomedical evidence for that question. Try naming the molecule, organism, pathway, or experimental method more precisely.",
                 "sources": [],
             }
-        answer, cited_indexes = await asyncio.to_thread(answer_from_evidence, question, ranked, CHAT_MODEL, OLLAMA_HOST, history)
+        answer, cited_indexes = await asyncio.to_thread(answer_from_evidence, question, ranked, provider, history)
         if not answer or not cited_indexes:
             return {
                 "conversation_id": conversation_id,
                 "disposition": "insufficient",
-                "answer": answer or "Relevant literature was found, but the local model did not produce a verifiable cited answer. Try making the question more specific.",
+                "answer": answer or "Relevant literature was found, but the model did not produce a verifiable cited answer. Try making the question more specific.",
                 "sources": [],
             }
         sources = [ranked[index].public(f"S{index + 1}") for index in cited_indexes]
         for source in sources:
-            source_cache[source["id"]] = source
-        conversations[conversation_id].append({"role": "user", "content": question})
-        conversations[conversation_id].append({"role": "assistant", "content": answer})
+            _cache_source(source)
+        conversation.append({"role": "user", "content": question})
+        conversation.append({"role": "assistant", "content": answer})
         return {"conversation_id": conversation_id, "disposition": "answered", "answer": answer, "sources": sources}
     except RagError as error:
         raise HTTPException(status_code=503, detail=str(error)) from error
@@ -124,3 +161,8 @@ async def source(source_id: str) -> dict[str, Any]:
     if source_id not in source_cache:
         raise HTTPException(status_code=404, detail="Source is not available in this assistant session.")
     return source_cache[source_id]
+
+
+DIST_DIR = Path(__file__).resolve().parents[1] / "dist"
+if DIST_DIR.is_dir():
+    app.mount("/", StaticFiles(directory=DIST_DIR, html=True), name="site")

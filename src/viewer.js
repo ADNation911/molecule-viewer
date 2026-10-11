@@ -1,6 +1,7 @@
 import * as Mol from '3dmol';
 import { summarizeAtoms, visibleSelection, residueSelector } from './structures.js';
 import { applyTransform, formatMeasurement, measurementValue } from './analysis.js';
+import { MAX_TRAJECTORY_FRAMES } from './advanced.js';
 
 const chainColors = [0x70c9bd, 0xf0bd79, 0xa499d9, 0x81b6da, 0xea9c9f, 0xb5cc86];
 const solidColors = { teal: 0x36b5a3, amber: 0xe5a64b, violet: 0x9b8be2, rose: 0xe08a9b };
@@ -20,6 +21,9 @@ export class MolecularViewer {
   constructor(element, onSurfaceError, onAtomClick) {
     this.view = Mol.createViewer(element, { backgroundColor: '#111e25', antialias: true });
     this.models = new Map();
+    this.densityData = new Map();
+    this.densityShapes = [];
+    this.measurementShapes = [];
     this.revision = 0;
     this.onSurfaceError = onSurfaceError;
     this.onAtomClick = onAtomClick;
@@ -36,10 +40,14 @@ export class MolecularViewer {
   prepare(text, format) {
     let candidate;
     try {
-      candidate = this.view.addModel(text, format, { keepH: true, multimodel: false });
+      candidate = this.view.addModelsAsFrames(text, format, { keepH: true });
+      const frameCount = Math.max(1, candidate.getNumFrames());
+      if (frameCount > MAX_TRAJECTORY_FRAMES) throw new Error(`Trajectories are limited to ${MAX_TRAJECTORY_FRAMES} frames in the browser.`);
       const atoms = candidate.selectedAtoms({});
       const summary = summarizeAtoms(atoms);
-      return { model: candidate, atoms, summary };
+      const frames = Array.isArray(candidate.frames) ? candidate.frames : [];
+      if (frames.some(frame => Array.isArray(frame) && frame.length !== atoms.length)) throw new Error('Every trajectory frame must contain the same number of atoms.');
+      return { model: candidate, atoms, summary, frameCount };
     } catch (error) {
       if (candidate) this.view.removeModel(candidate);
       throw error;
@@ -68,6 +76,9 @@ export class MolecularViewer {
     this.revision++;
     this.view.clear();
     this.models.clear();
+    this.densityData.clear();
+    this.densityShapes = [];
+    this.measurementShapes = [];
     this.view.render();
   }
 
@@ -75,7 +86,8 @@ export class MolecularViewer {
     const version = ++this.revision;
     this.view.removeAllSurfaces();
     this.view.removeAllLabels();
-    this.view.removeAllShapes();
+    for (const shape of this.measurementShapes) this.view.removeShape(shape);
+    this.measurementShapes = [];
     for (const object of objects) {
       const entry = this.models.get(object.id);
       if (!entry) continue;
@@ -153,14 +165,15 @@ export class MolecularViewer {
   }
 
   drawMeasurements(objects, measurements, draft) {
-    const drawPoint = (point, color, radius = .22) => this.view.addSphere({ center: point, radius, color });
+    const addShape = shape => { this.measurementShapes.push(shape); return shape; };
+    const drawPoint = (point, color, radius = .22) => addShape(this.view.addSphere({ center: point, radius, color }));
     for (const measurement of measurements) {
       const resolved = measurement.points.map(point => this.resolvePoint(objects, point));
       if (resolved.some(point => !point)) continue;
       const points = resolved.map(item => item.atom);
       const color = 0xffc857;
       for (let index = 1; index < points.length; index++) {
-        this.view.addLine({ start: points[index - 1], end: points[index], color, dashed: true, dashLength: .35, gapLength: .18 });
+        addShape(this.view.addLine({ start: points[index - 1], end: points[index], color, dashed: true, dashLength: .35, gapLength: .18 }));
       }
       points.forEach(point => drawPoint(point, color));
       try {
@@ -195,6 +208,91 @@ export class MolecularViewer {
     const entry = this.models.get(id);
     if (!entry) throw new Error('Choose a valid moving object.');
     return this.setCoordinates(id, entry.atoms.map(atom => applyTransform(atom, transform)));
+  }
+
+  async setFrame(id, frame) {
+    const entry = this.models.get(id);
+    if (!entry) throw new Error('Choose a valid trajectory object.');
+    const count = Math.max(1, entry.model.getNumFrames());
+    const index = Math.max(0, Math.min(count - 1, Math.floor(frame)));
+    await entry.model.setFrame(index);
+    const atoms = entry.model.selectedAtoms({});
+    const summary = summarizeAtoms(atoms);
+    entry.atoms = atoms;
+    entry.summary = summary;
+    entry.model.setClickable({}, true, atom => this.onAtomClick?.(id, atom));
+    return { atoms, summary, frame: index, frameCount: count };
+  }
+
+  loadDensity(id, text, format) {
+    this.densityData.set(id, new Mol.VolumeData(text, format));
+  }
+
+  removeDensity(id) {
+    this.densityData.delete(id);
+  }
+
+  renderDensityMaps(maps) {
+    for (const shape of this.densityShapes) this.view.removeShape(shape);
+    this.densityShapes = [];
+    for (const map of maps) {
+      const data = this.densityData.get(map.id);
+      if (!data || !map.visible) continue;
+      const common = { opacity: map.opacity, wireframe: map.wireframe, smoothness: 2 };
+      this.densityShapes.push(this.view.addIsosurface(data, { ...common, isoval: Math.abs(map.isovalue), color: map.color }));
+      if (map.negative) this.densityShapes.push(this.view.addIsosurface(data, { ...common, isoval: -Math.abs(map.isovalue), color: map.negativeColor }));
+    }
+    this.view.render();
+  }
+
+  getView() { return this.view.getView().slice(0, 8); }
+  setView(value) { this.view.setView(value); }
+  rotate(degrees, axis = 'y') { this.view.rotate(degrees, axis); }
+  imageURI() { return this.view.pngURI(); }
+
+  animateView(target, duration = 700) {
+    const start = this.getView();
+    const destination = target.slice(0, 8);
+    const started = performance.now();
+    return new Promise(resolve => {
+      const step = now => {
+        const raw = Math.min(1, (now - started) / duration);
+        const amount = raw < .5 ? 2 * raw * raw : 1 - ((-2 * raw + 2) ** 2) / 2;
+        const view = start.map((value, index) => value + (destination[index] - value) * amount);
+        const length = Math.hypot(...view.slice(4, 8)) || 1;
+        for (let index = 4; index < 8; index++) view[index] /= length;
+        this.setView(view);
+        if (raw < 1) requestAnimationFrame(step); else resolve();
+      };
+      requestAnimationFrame(step);
+    });
+  }
+
+  async turntableURI(frames = 24) {
+    const start = this.getView();
+    const capture = this.view.apngURI(frames);
+    for (let index = 0; index < frames; index++) {
+      this.rotate(360 / frames, 'y');
+      await new Promise(resolve => requestAnimationFrame(resolve));
+    }
+    const uri = await capture;
+    this.setView(start);
+    return uri;
+  }
+
+  async trajectoryURI(id, indexes, startFrame = 0) {
+    const entry = this.models.get(id);
+    if (!entry || !indexes.length) throw new Error('The active object has no trajectory frames.');
+    const capture = this.view.apngURI(indexes.length);
+    for (const index of indexes) {
+      await entry.model.setFrame(index);
+      this.view.render();
+      await new Promise(resolve => requestAnimationFrame(resolve));
+    }
+    const uri = await capture;
+    await entry.model.setFrame(startFrame);
+    this.view.render();
+    return uri;
   }
 
   fit(id) {
