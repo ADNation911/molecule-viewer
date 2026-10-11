@@ -110,6 +110,22 @@ def _conversation(conversation_id: str) -> deque[dict[str, str]]:
     return history
 
 
+def _chat_result(
+    conversation_id: str,
+    disposition: str,
+    answer: str,
+    sources: list[dict[str, Any]] | None = None,
+    actions: list[dict[str, str]] | None = None,
+) -> dict[str, Any]:
+    return {
+        "conversation_id": conversation_id,
+        "disposition": disposition,
+        "answer": answer,
+        "sources": sources or [],
+        "actions": actions or [],
+    }
+
+
 def _cache_source(source: dict[str, Any]) -> None:
     source_cache.pop(source["id"], None)
     source_cache[source["id"]] = source
@@ -154,35 +170,32 @@ async def chat(payload: ChatRequest, request: Request) -> dict[str, Any]:
     try:
         in_scope = await asyncio.to_thread(classify_scope, retrieval_question, provider)
         if not in_scope:
-            return {
-                "conversation_id": conversation_id,
-                "disposition": "declined",
-                "answer": "I can only answer questions about molecules, chemistry, biotechnology, and closely related biology. Try asking about a protein, compound, pathway, assay, or molecular mechanism.",
-                "sources": [],
-            }
+            return _chat_result(
+                conversation_id,
+                "declined",
+                "I can only answer questions about molecules, chemistry, biotechnology, and closely related biology. Try asking about a protein, compound, pathway, assay, or molecular mechanism.",
+            )
         candidates = await asyncio.to_thread(search_europe_pmc, retrieval_question)
         ranked = await asyncio.to_thread(rank_evidence, retrieval_question, candidates, provider)
         if not ranked:
-            return {
-                "conversation_id": conversation_id,
-                "disposition": "insufficient",
-                "answer": "I could not find enough citable biomedical evidence for that question. Try naming the molecule, organism, pathway, or experimental method more precisely.",
-                "sources": [],
-            }
+            return _chat_result(
+                conversation_id,
+                "insufficient",
+                "I could not find enough citable biomedical evidence for that question. Try naming the molecule, organism, pathway, or experimental method more precisely.",
+            )
         answer, cited_indexes, actions = await asyncio.to_thread(answer_from_evidence, question, ranked, provider, history, structure_context)
         if not answer or not cited_indexes:
-            return {
-                "conversation_id": conversation_id,
-                "disposition": "insufficient",
-                "answer": answer or "Relevant literature was found, but the model did not produce a verifiable cited answer. Try making the question more specific.",
-                "sources": [],
-            }
+            return _chat_result(
+                conversation_id,
+                "insufficient",
+                answer or "Relevant literature was found, but the model did not produce a verifiable cited answer. Try making the question more specific.",
+            )
         sources = [ranked[index].public(f"S{index + 1}") for index in cited_indexes]
-        for source in sources:
-            _cache_source(source)
+        for source_item in sources:
+            _cache_source(source_item)
         conversation.append({"role": "user", "content": question})
         conversation.append({"role": "assistant", "content": answer})
-        return {"conversation_id": conversation_id, "disposition": "answered", "answer": answer, "sources": sources, "actions": actions}
+        return _chat_result(conversation_id, "answered", answer, sources, actions)
     except RagError as error:
         raise HTTPException(status_code=503, detail=str(error)) from error
 
@@ -192,7 +205,6 @@ async def source(source_id: str) -> dict[str, Any]:
     if source_id not in source_cache:
         raise HTTPException(status_code=404, detail="Source is not available in this assistant session.")
     return source_cache[source_id]
-
 
 DIST_DIR = Path(__file__).resolve().parents[1] / "dist"
 if DIST_DIR.is_dir():

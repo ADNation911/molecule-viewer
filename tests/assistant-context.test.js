@@ -31,3 +31,21 @@ test('report export includes the question, answer, structure, and cited links', 
 test('residue action identifiers preserve chain, insertion code, and residue name', () => {
   assert.equal(residueTargetId(residue), 'A:42B:GLY');
 });
+
+test('large structure context stays bounded while retaining the active residue', () => {
+  const residues = Array.from({ length: 900 }, (_, index) => ({
+    key: `r${index + 1}`, chain: 'A', resi: index + 1, icode: '', resn: 'GLY',
+  }));
+  const object = {
+    id: 'object-large', title: 'Large protein', format: 'pdb', currentFrame: 0, frameCount: 1,
+    summary: { atomCount: 900, residueCount: 900, chains: [{ id: 'A' }], ligands: [], residues },
+  };
+
+  const context = buildStructureContext(object, {
+    objectId: 'object-large', kind: 'residue', label: 'GLY 900', primaryKeys: ['r900'],
+  });
+
+  assert.equal(context.residues.length, 600);
+  assert.ok(context.residues.some(item => item.id === 'A:900:GLY'));
+  assert.deepEqual(context.selection.residue_ids, ['A:900:GLY']);
+});

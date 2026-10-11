@@ -14,12 +14,12 @@ npm run dev
 Open http://127.0.0.1:5173. On Windows PowerShell, use `npm.cmd` if script execution policy blocks `npm.ps1`.
 
 ```sh
-npm test
-npm run build
+python -m pip install -r backend/requirements.txt
+npm run check
 npm run preview
 ```
 
-Stop the dev server before starting preview: both use port 5173. Preview serves the production build from `dist/`. Use the build workflow; directly opening `index.html` no longer runs the module-based app.
+The Python dependencies are only needed for the backend checks and assistant. `npm run check` runs the frontend unit tests, backend unit and API-contract tests, and the production build. Stop the dev server before starting preview: both use port 5173. Preview serves the production build from `dist/`. Use the build workflow; directly opening `index.html` no longer runs the module-based app.
 
 ## What works
 
@@ -56,9 +56,11 @@ Each structure file may be up to 10 MB and 75,000 atoms; the combined workspace 
 - `src/pdb.js`: PDB ID validation and RCSB fetch behavior.
 - `src/analysis.js`: measurement geometry, sequence correspondence and rigid-body superposition.
 - `src/advanced.js`: density/trajectory limits and the allowlisted command parser.
+- `src/advanced-ui.js`: density-map and camera-scene controls.
 - `src/session.js`: versioned workspace serialization and validation.
 - `src/assistant.js`: assistant connection, chat state and cited source rendering.
 - `src/assistant-context.js`: bounded viewer context, stable action targets and cited report generation.
+- `src/workspace-utils.js`: shared workspace identifiers, filenames and browser downloads.
 - `src/history.js`: bounded, immutable display history.
 - `backend/`: scoped retrieval, Europe PMC evidence search, local embeddings and cited answer API.
 - `src/samples.js`, `public/samples/`: bundled sample catalog/data.

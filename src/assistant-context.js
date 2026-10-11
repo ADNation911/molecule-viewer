@@ -1,3 +1,5 @@
+import { fileStem } from './workspace-utils.js';
+
 const MAX_CONTEXT_RESIDUES = 600;
 
 export function residueTargetId(residue) {
@@ -84,6 +86,5 @@ export function createCitedReport({ question, answer, sources = [], context = nu
 }
 
 export function reportFilename(context) {
-  const stem = String(context?.title || 'molecule3d-report').replace(/[^a-z0-9_-]+/gi, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'molecule3d-report';
-  return `${stem}-literature-report.md`;
+  return `${fileStem(context?.title, 'molecule3d-report')}-literature-report.md`;
 }

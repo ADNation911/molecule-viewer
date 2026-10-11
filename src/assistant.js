@@ -1,4 +1,5 @@
 import { createCitedReport, reportFilename } from './assistant-context.js';
+import { downloadBlob } from './workspace-utils.js';
 
 const configuredEndpoint = import.meta.env.VITE_RAG_API_URL?.trim();
 const browserHost = typeof window === 'undefined' ? '' : window.location.hostname;
@@ -67,12 +68,7 @@ function createSources(sources) {
 
 function downloadReport(question, payload, context) {
   const content = createCitedReport({ question, answer: payload.answer, sources: payload.sources, context });
-  const url = URL.createObjectURL(new Blob([content], { type: 'text/markdown;charset=utf-8' }));
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = reportFilename(context);
-  link.click();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  downloadBlob(content, reportFilename(context), 'text/markdown;charset=utf-8');
 }
 
 function createResponse(question, payload, context, onViewerAction, onRecord) {

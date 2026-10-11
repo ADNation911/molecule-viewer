@@ -17,6 +17,8 @@ import {
   commandExamples, densityFormat, parseCommand, sampledFrameIndexes, validateDensityText,
 } from './advanced.js';
 import { createSession, MAX_SESSION_BYTES, parseSession } from './session.js';
+import { createIdFactory, downloadBlob, downloadUrl, fileStem } from './workspace-utils.js';
+import { createDensityCard, createSceneRow } from './advanced-ui.js';
 
 const $ = id => document.getElementById(id);
 const all = selector => [...document.querySelectorAll(selector)];
@@ -34,11 +36,7 @@ let measurementDraft = [];
 let busy = false;
 let spinning = false;
 let ready = false;
-let nextObjectId = 1;
-let nextSelectionId = 1;
-let nextMeasurementId = 1;
-let nextDensityId = 1;
-let nextSceneId = 1;
+const ids = createIdFactory(['object', 'selection', 'measurement', 'density', 'scene']);
 let trajectoryTimer = null;
 let trajectoryPlaying = false;
 let frameChanging = false;
@@ -413,26 +411,6 @@ function syncAnalysis() {
   }
 }
 
-function downloadBlob(content, filename, type) {
-  const url = URL.createObjectURL(new Blob([content], { type }));
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = filename;
-  link.click();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
-
-function downloadDataURI(uri, filename) {
-  const link = document.createElement('a');
-  link.href = uri;
-  link.download = filename;
-  link.click();
-}
-
-function fileStem(value = 'molecule3d') {
-  return value.replace(/\.[^.]+$/, '').replace(/[^a-z0-9_-]+/gi, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'molecule3d';
-}
-
 function pauseTrajectory() {
   trajectoryPlaying = false;
   if (trajectoryTimer != null) clearTimeout(trajectoryTimer);
@@ -488,63 +466,6 @@ function toggleTrajectory() {
   record(`Playing ${current.title} trajectory`);
 }
 
-function densityCard(map) {
-  const card = document.createElement('article');
-  card.className = 'density-card';
-  card.dataset.densityId = map.id;
-  const heading = document.createElement('div');
-  heading.className = 'density-card-heading';
-  const title = document.createElement('strong');
-  title.textContent = map.name;
-  title.title = `${map.dimensions.join(' × ')} grid · ${map.voxelCount.toLocaleString()} voxels`;
-  const headingActions = document.createElement('div');
-  const visibility = document.createElement('button');
-  visibility.className = 'object-icon';
-  visibility.dataset.densityVisibility = map.id;
-  visibility.title = map.visible ? 'Hide density map' : 'Show density map';
-  visibility.setAttribute('aria-label', visibility.title);
-  visibility.textContent = map.visible ? '●' : '○';
-  const remove = document.createElement('button');
-  remove.className = 'object-icon';
-  remove.dataset.removeDensity = map.id;
-  remove.setAttribute('aria-label', `Remove ${map.name}`);
-  remove.textContent = '×';
-  headingActions.append(visibility, remove);
-  heading.append(title, headingActions);
-  const controls = document.createElement('div');
-  controls.className = 'density-controls';
-  const isoLabel = document.createElement('label');
-  isoLabel.textContent = 'Isovalue';
-  const iso = document.createElement('input');
-  iso.type = 'number'; iso.min = '0.000001'; iso.max = '1000000'; iso.step = '0.001'; iso.value = map.isovalue;
-  iso.dataset.densityIso = map.id;
-  isoLabel.append(iso);
-  const opacityLabel = document.createElement('label');
-  opacityLabel.textContent = `Opacity ${Math.round(map.opacity * 100)}%`;
-  const opacity = document.createElement('input');
-  opacity.type = 'range'; opacity.min = '10'; opacity.max = '100'; opacity.step = '5'; opacity.value = String(map.opacity * 100);
-  opacity.dataset.densityOpacity = map.id;
-  opacityLabel.append(opacity);
-  controls.append(isoLabel, opacityLabel);
-  const options = document.createElement('div');
-  options.className = 'density-options';
-  const negativeLabel = document.createElement('label');
-  const negative = document.createElement('input');
-  negative.type = 'checkbox'; negative.checked = map.negative; negative.dataset.densityNegative = map.id;
-  negativeLabel.append(negative, document.createTextNode(' ± contours'));
-  const wireLabel = document.createElement('label');
-  const wire = document.createElement('input');
-  wire.type = 'checkbox'; wire.checked = map.wireframe; wire.dataset.densityWire = map.id;
-  wireLabel.append(wire, document.createTextNode(' Mesh'));
-  const positiveColor = document.createElement('input');
-  positiveColor.type = 'color'; positiveColor.value = map.color; positiveColor.dataset.densityColor = map.id; positiveColor.title = 'Positive contour color';
-  const negativeColor = document.createElement('input');
-  negativeColor.type = 'color'; negativeColor.value = map.negativeColor; negativeColor.dataset.densityNegativeColor = map.id; negativeColor.title = 'Negative contour color';
-  options.append(negativeLabel, wireLabel, positiveColor, negativeColor);
-  card.append(heading, controls, options);
-  return card;
-}
-
 function syncAdvanced() {
   const current = activeObject();
   const frameCount = current?.frameCount || 1;
@@ -558,19 +479,12 @@ function syncAdvanced() {
   $('density-list').replaceChildren();
   if (!densityMaps.length) {
     const empty = document.createElement('p'); empty.className = 'muted'; empty.textContent = 'No density maps loaded.'; $('density-list').append(empty);
-  } else $('density-list').append(...densityMaps.map(densityCard));
+  } else $('density-list').append(...densityMaps.map(createDensityCard));
   $('scene-count').textContent = scenes.length;
   $('scene-list').replaceChildren();
   if (!scenes.length) {
     const empty = document.createElement('p'); empty.className = 'muted'; empty.textContent = 'No camera scenes saved.'; $('scene-list').append(empty);
-  } else for (const scene of scenes) {
-    const row = document.createElement('div'); row.className = 'scene-row';
-    const apply = document.createElement('button'); apply.className = 'scene-apply'; apply.dataset.sceneId = scene.id;
-    const title = document.createElement('strong'); title.textContent = scene.name; apply.append(title);
-    const buttons = document.createElement('div');
-    const remove = document.createElement('button'); remove.className = 'object-icon'; remove.dataset.removeScene = scene.id; remove.textContent = '×'; remove.setAttribute('aria-label', `Delete ${scene.name}`);
-    buttons.append(remove); row.append(apply, buttons); $('scene-list').append(row);
-  }
+  } else $('scene-list').append(...scenes.map(createSceneRow));
   $('play-scenes').disabled = !scenes.length || busy;
   $('play-scenes').textContent = scenePlaying ? 'Stop tour' : 'Play tour';
   all('[data-action="export-image"], [data-action="export-animation"], [data-action="save-session"]').forEach(button => { button.disabled = (!objects.length && !densityMaps.length) || busy; });
@@ -578,7 +492,7 @@ function syncAdvanced() {
 
 async function addDensityMap(text, info, format, restored = null) {
   const metadata = validateDensityText(text, format);
-  const id = restored?.id || `density-${nextDensityId++}`;
+  const id = restored?.id || ids.take('density');
   renderer.loadDensity(id, text, format);
   densityMaps.push({
     id, name: info.name || 'Density map', text, format, ...metadata,
@@ -611,7 +525,7 @@ function saveScene(name) {
   if (!objects.length && !densityMaps.length) throw new Error('Load a structure or density map before saving a scene.');
   const sceneName = name.trim() || `Scene ${scenes.length + 1}`;
   scenes.push({
-    id: `scene-${nextSceneId++}`,
+    id: ids.take('scene'),
     name: sceneName,
     view: renderer.getView(),
     activeId,
@@ -684,11 +598,7 @@ function clearWorkspaceState() {
   renderer.clear();
   objects.splice(0); namedSelections.splice(0); measurements.splice(0); densityMaps.splice(0); scenes.splice(0);
   activeId = null; selection = null; measurementMode = null; measurementDraft = []; spinning = false;
-  nextObjectId = 1; nextSelectionId = 1; nextMeasurementId = 1; nextDensityId = 1; nextSceneId = 1;
-}
-
-function nextId(items, prefix) {
-  return items.reduce((maximum, item) => Math.max(maximum, Number(item.id?.match(new RegExp(`^${prefix}-(\\d+)$`))?.[1]) || 0), 0) + 1;
+  ids.reset();
 }
 
 async function openWorkspaceFile(file) {
@@ -716,8 +626,11 @@ async function openWorkspaceFile(file) {
     scenes.push(...structuredClone(session.scenes));
     activeId = objectById(session.activeId)?.id || objects[0]?.id || null;
     selection = session.selection && objectById(session.selection.objectId) ? structuredClone(session.selection) : null;
-    nextObjectId = nextId(objects, 'object'); nextSelectionId = nextId(namedSelections, 'selection');
-    nextMeasurementId = nextId(measurements, 'measurement'); nextDensityId = nextId(densityMaps, 'density'); nextSceneId = nextId(scenes, 'scene');
+    ids.restore('object', objects);
+    ids.restore('selection', namedSelections);
+    ids.restore('measurement', measurements);
+    ids.restore('density', densityMaps);
+    ids.restore('scene', scenes);
     renderViewer(); renderer.renderDensityMaps(densityMaps); syncStructure();
     if (session.camera) renderer.setView(session.camera); else renderer.fit();
     record(`Opened workspace · ${objects.length} objects, ${densityMaps.length} maps, ${scenes.length} scenes`);
@@ -727,7 +640,7 @@ async function openWorkspaceFile(file) {
 
 function exportImage() {
   if (!objects.length && !densityMaps.length) return;
-  downloadDataURI(renderer.imageURI(), `${fileStem(activeObject()?.title)}-${Date.now()}.png`);
+  downloadUrl(renderer.imageURI(), `${fileStem(activeObject()?.title)}-${Date.now()}.png`);
   record('Exported PNG figure');
 }
 
@@ -741,7 +654,7 @@ async function exportAnimation() {
     const uri = current?.frameCount > 1
       ? await renderer.trajectoryURI(current.id, sampledFrameIndexes(current.frameCount), current.currentFrame)
       : await renderer.turntableURI(24);
-    downloadDataURI(uri, `${fileStem(current?.title || 'molecule3d')}-animation.png`);
+    downloadUrl(uri, `${fileStem(current?.title)}-animation.png`);
     record(`Exported ${current?.frameCount > 1 ? 'trajectory' : 'turntable'} APNG animation`);
   } catch (error) { notice(error.message || 'The animation could not be exported.', true); }
   finally { setBusy(false); renderViewer(); renderer.renderDensityMaps(densityMaps); }
@@ -749,45 +662,94 @@ async function exportAnimation() {
 
 async function executeCommand(command) {
   const current = activeObject();
-  if (command.type === 'help') return commandExamples.join(' · ');
-  if (command.type === 'fit') { if (!current) throw new Error('Load or select an object first.'); renderer.fit(current.id); return `Fit ${current.title}.`; }
-  if (command.type === 'play') { if (!current || current.frameCount <= 1) throw new Error('The active object has no trajectory.'); if (!trajectoryPlaying) toggleTrajectory(); return `Playing ${current.title}.`; }
-  if (command.type === 'pause') { pauseTrajectory(); return 'Trajectory paused.'; }
-  if (command.type === 'style') { if (!current) throw new Error('Select an object first.'); if (['cartoon', 'ribbon'].includes(command.value) && !current.summary.hasBackbone) throw new Error('This representation needs a protein or nucleic-acid backbone.'); if (command.value === 'surface' && current.summary.atomCount > MAX_SURFACE_ATOMS) throw new Error('Surfaces support up to 15,000 atoms.'); changeDisplay({ style: command.value }, `${current.title}: ${styleLabel(command.value)}`); return `Style set to ${styleLabel(command.value)}.`; }
-  if (command.type === 'color') { if (!current) throw new Error('Select an object first.'); changeDisplay({ color: command.value }, `${current.title} color: ${command.value}`); return `Color set to ${command.value}.`; }
-  if (command.type === 'visibility') {
-    if (!current) throw new Error('Select an object first.');
-    const key = { object: 'visible', water: 'water', ligands: 'ligands', labels: 'labels' }[command.target];
-    changeDisplay({ [key]: command.value }, `${current.title} ${key}: ${command.value ? 'on' : 'off'}`);
-    return `${command.value ? 'Showing' : 'Hiding'} ${command.target}.`;
+  switch (command.type) {
+    case 'help':
+      return commandExamples.join(' · ');
+    case 'fit':
+      if (!current) throw new Error('Load or select an object first.');
+      renderer.fit(current.id);
+      return `Fit ${current.title}.`;
+    case 'play':
+      if (!current || current.frameCount <= 1) throw new Error('The active object has no trajectory.');
+      if (!trajectoryPlaying) toggleTrajectory();
+      return `Playing ${current.title}.`;
+    case 'pause':
+      pauseTrajectory();
+      return 'Trajectory paused.';
+    case 'style': {
+      if (!current) throw new Error('Select an object first.');
+      if (['cartoon', 'ribbon'].includes(command.value) && !current.summary.hasBackbone) throw new Error('This representation needs a protein or nucleic-acid backbone.');
+      if (command.value === 'surface' && current.summary.atomCount > MAX_SURFACE_ATOMS) throw new Error('Surfaces support up to 15,000 atoms.');
+      const label = styleLabel(command.value);
+      changeDisplay({ style: command.value }, `${current.title}: ${label}`);
+      return `Style set to ${label}.`;
+    }
+    case 'color':
+      if (!current) throw new Error('Select an object first.');
+      changeDisplay({ color: command.value }, `${current.title} color: ${command.value}`);
+      return `Color set to ${command.value}.`;
+    case 'visibility': {
+      if (!current) throw new Error('Select an object first.');
+      const key = { object: 'visible', water: 'water', ligands: 'ligands', labels: 'labels' }[command.target];
+      changeDisplay({ [key]: command.value }, `${current.title} ${key}: ${command.value ? 'on' : 'off'}`);
+      return `${command.value ? 'Showing' : 'Hiding'} ${command.target}.`;
+    }
+    case 'frame':
+      if (!current || current.frameCount <= 1) throw new Error('The active object has no trajectory.');
+      if (command.value >= current.frameCount) throw new Error(`Choose a frame from 1 to ${current.frameCount}.`);
+      await setActiveFrame(command.value);
+      return `Frame ${command.value + 1} selected.`;
+    case 'turn': {
+      const axis = command.axis.toUpperCase();
+      renderer.rotate(command.degrees, command.axis);
+      record(`Turned view ${command.degrees}° around ${axis}`);
+      return `Turned ${command.degrees}° around ${axis}.`;
+    }
+    case 'theme':
+      applyTheme(command.value);
+      return `${command.value[0].toUpperCase() + command.value.slice(1)} theme enabled.`;
+    case 'select-chain': {
+      const chain = current?.summary.chains.find(item => item.id.toLowerCase() === command.value.toLowerCase());
+      if (!chain) throw new Error(`Chain ${command.value} is not present in the active object.`);
+      setSelection({ objectId: current.id, kind: 'chain', chain: chain.id, primaryKeys: [], secondaryKeys: [], label: `Chain ${chain.id || 'unassigned'}` }, `Selected chain ${chain.id} in ${current.title}`);
+      return `Selected chain ${chain.id}.`;
+    }
+    case 'select-residue': {
+      if (!current) throw new Error('Select an object first.');
+      const match = command.value.match(/^(?:([^:]+):)?(-?\d+)([A-Za-z]?)$/);
+      const residue = current.summary.residues.find(item => (
+        (!match[1] || item.chain.toLowerCase() === match[1].toLowerCase())
+        && String(item.resi) === match[2]
+        && String(item.icode || '').toLowerCase() === match[3].toLowerCase()
+      ));
+      if (!residue) throw new Error(`Residue ${command.value} is not present in the active object.`);
+      selectResidue(residue.key);
+      return `Selected ${residue.resn} ${residue.resi}${residue.icode || ''}.`;
+    }
+    case 'select-ligand': {
+      const ligand = current?.summary.ligands.find(item => item.resn.toUpperCase() === command.value);
+      if (!ligand) throw new Error(`Ligand ${command.value} is not present in the active object.`);
+      selectResidue(ligand.key, 'Ligand');
+      return `Selected ligand ${command.value}.`;
+    }
+    case 'scene-save':
+      saveScene(command.name);
+      return `Saved scene ${command.name}.`;
+    case 'scene-play':
+      await toggleSceneTour();
+      return 'Scene tour started.';
+    case 'export-image':
+      exportImage();
+      return 'PNG export started.';
+    case 'export-animation':
+      await exportAnimation();
+      return 'Animation export complete.';
+    case 'export-session':
+      saveWorkspace();
+      return 'Workspace download started.';
+    default:
+      throw new Error('This command is not available.');
   }
-  if (command.type === 'frame') { if (!current || current.frameCount <= 1) throw new Error('The active object has no trajectory.'); if (command.value >= current.frameCount) throw new Error(`Choose a frame from 1 to ${current.frameCount}.`); await setActiveFrame(command.value); return `Frame ${command.value + 1} selected.`; }
-  if (command.type === 'turn') { renderer.rotate(command.degrees, command.axis); record(`Turned view ${command.degrees}° around ${command.axis.toUpperCase()}`); return `Turned ${command.degrees}° around ${command.axis.toUpperCase()}.`; }
-  if (command.type === 'theme') { applyTheme(command.value); return `${command.value[0].toUpperCase() + command.value.slice(1)} theme enabled.`; }
-  if (command.type === 'select-chain') {
-    if (!current?.summary.chains.some(chain => chain.id.toLowerCase() === command.value.toLowerCase())) throw new Error(`Chain ${command.value} is not present in the active object.`);
-    const chain = current.summary.chains.find(item => item.id.toLowerCase() === command.value.toLowerCase()).id;
-    setSelection({ objectId: current.id, kind: 'chain', chain, primaryKeys: [], secondaryKeys: [], label: `Chain ${chain || 'unassigned'}` }, `Selected chain ${chain} in ${current.title}`);
-    return `Selected chain ${chain}.`;
-  }
-  if (command.type === 'select-residue') {
-    if (!current) throw new Error('Select an object first.');
-    const match = command.value.match(/^(?:([^:]+):)?(-?\d+)([A-Za-z]?)$/);
-    const residue = current.summary.residues.find(item => (!match[1] || item.chain.toLowerCase() === match[1].toLowerCase()) && String(item.resi) === match[2] && String(item.icode || '').toLowerCase() === match[3].toLowerCase());
-    if (!residue) throw new Error(`Residue ${command.value} is not present in the active object.`);
-    selectResidue(residue.key); return `Selected ${residue.resn} ${residue.resi}${residue.icode || ''}.`;
-  }
-  if (command.type === 'select-ligand') {
-    const ligand = current?.summary.ligands.find(item => item.resn.toUpperCase() === command.value);
-    if (!ligand) throw new Error(`Ligand ${command.value} is not present in the active object.`);
-    selectResidue(ligand.key, 'Ligand'); return `Selected ligand ${command.value}.`;
-  }
-  if (command.type === 'scene-save') { saveScene(command.name); return `Saved scene ${command.name}.`; }
-  if (command.type === 'scene-play') { await toggleSceneTour(); return 'Scene tour started.'; }
-  if (command.type === 'export-image') { exportImage(); return 'PNG export started.'; }
-  if (command.type === 'export-animation') { await exportAnimation(); return 'Animation export complete.'; }
-  if (command.type === 'export-session') { saveWorkspace(); return 'Workspace download started.'; }
-  throw new Error('This command is not available.');
 }
 
 function syncStructure() {
@@ -856,7 +818,7 @@ async function openStructure(read, info, format, restore = null) {
     await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     prepared = renderer.prepare(text, format);
     if (totalAtoms() + prepared.summary.atomCount > MAX_WORKSPACE_ATOMS) throw new Error('The workspace would exceed 120,000 atoms. Remove an object before adding this structure.');
-    const id = restore?.id || `object-${nextObjectId++}`;
+    const id = restore?.id || ids.take('object');
     const object = {
       id, ...info, format, summary: prepared.summary, atoms: prepared.atoms,
       title: info.title || info.name,
@@ -936,10 +898,16 @@ function selectObject(id, fit = false) {
 }
 
 function setSelection(next, message) {
+  const activeObjectChanged = !!next?.objectId && next.objectId !== activeId;
   selection = next;
   if (next?.objectId) activeId = next.objectId;
   renderViewer();
-  syncStructure();
+  if (activeObjectChanged) syncStructure();
+  else {
+    syncExplore();
+    syncNamedSelections();
+    assistantController?.refreshContext();
+  }
   if (message) record(message);
 }
 
@@ -991,7 +959,7 @@ function selectAtom(id, atom) {
       try {
         const value = measurementValue(measurementMode, pickedAtoms);
         const completedType = measurementMode;
-        measurements.push({ id: `measurement-${nextMeasurementId++}`, type: completedType, points: structuredClone(measurementDraft) });
+        measurements.push({ id: ids.take('measurement'), type: completedType, points: structuredClone(measurementDraft) });
         measurementMode = null;
         measurementDraft = [];
         renderViewer();
@@ -1360,7 +1328,7 @@ $('selection-form').addEventListener('submit', event => {
   event.preventDefault();
   const name = $('selection-name').value.trim();
   if (!selection || !name) { notice('Choose something in the active object and enter a selection name.', true); return; }
-  namedSelections.push({ id: `selection-${nextSelectionId++}`, name, objectId: selection.objectId, selection: structuredClone(selection) });
+  namedSelections.push({ id: ids.take('selection'), name, objectId: selection.objectId, selection: structuredClone(selection) });
   $('selection-name').value = '';
   syncNamedSelections();
   record(`Saved selection ${name}`);
