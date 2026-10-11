@@ -38,9 +38,9 @@ Stop the dev server before starting preview: both use port 5173. Preview serves 
 - Undo/redo for the active object's display settings. Camera movements are independent.
 - Drag rotation, right-drag pan, scroll/button zoom, fit, opt-in auto-rotation, keyboard shortcuts.
 - Resizable/collapsible inspector, light/dark theme, helpful empty/error states and session activity log.
-- Molecular-science assistant restricted to biotechnology and chemistry, with Europe PMC retrieval, local or hosted open-weight inference, inline citations, and inspectable source cards.
+- Molecular-science assistant restricted to biotechnology and chemistry, with Europe PMC retrieval, local or hosted open-weight inference, active-structure metadata, validated viewer highlights, inline citations, source cards and downloadable reports.
 
-Files are read locally and structure contents are not sent to the assistant. Assistant questions go to the Python backend and literature searches go to Europe PMC. Local development uses Qwen3 and Nomic embeddings through Ollama with no API key. Public deployment can use Llama 3.1 and BGE through Cloudflare Workers AI, with its token kept only on the server. Follow [the RAG setup](docs/RAG_SETUP.md) for local use or [the Render deployment guide](docs/DEPLOY_RENDER.md) for a public site.
+Files are read locally and structure contents and coordinates are not sent to the assistant. When enabled, the assistant receives bounded metadata for the active object, its frame, and selection so deictic questions and validated highlights can refer to the viewer. Assistant questions go to the Python backend and literature searches go to Europe PMC. Local development uses Qwen3 and Nomic embeddings through Ollama with no API key. Public deployment can use Llama 3.1 and BGE through Cloudflare Workers AI, with its token kept only on the server. Follow [the RAG setup](docs/RAG_SETUP.md) for local use or [the Render deployment guide](docs/DEPLOY_RENDER.md) for a public site.
 
 ## Limits
 
@@ -58,6 +58,7 @@ Each structure file may be up to 10 MB and 75,000 atoms; the combined workspace 
 - `src/advanced.js`: density/trajectory limits and the allowlisted command parser.
 - `src/session.js`: versioned workspace serialization and validation.
 - `src/assistant.js`: assistant connection, chat state and cited source rendering.
+- `src/assistant-context.js`: bounded viewer context, stable action targets and cited report generation.
 - `src/history.js`: bounded, immutable display history.
 - `backend/`: scoped retrieval, Europe PMC evidence search, local embeddings and cited answer API.
 - `src/samples.js`, `public/samples/`: bundled sample catalog/data.

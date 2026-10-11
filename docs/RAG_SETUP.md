@@ -48,6 +48,8 @@ Then verify the boundary:
 
 The first response should contain inline `[S#]` citations and source cards. The second should be declined without searching literature or invoking answer generation.
 
+With a structure loaded, select a chain, residue, or ligand and choose **Ask assistant about this selection**. Only bounded object metadata and stable selection identifiers are attached; coordinates and structure-file text remain in the browser. Viewer actions returned by the model are discarded unless the backend can match them to the attached object's allowlisted chains, residues, or ligands. Cited answers can be downloaded as Markdown reports.
+
 ## Configuration
 
 The local defaults can be changed with environment variables before starting Uvicorn:

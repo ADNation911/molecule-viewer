@@ -20,6 +20,7 @@ from .rag import (
     RagError,
     answer_from_evidence,
     classify_scope,
+    contextual_search_question,
     rank_evidence,
     search_europe_pmc,
 )
@@ -61,9 +62,37 @@ app.add_middleware(
 )
 
 
+class StructureTarget(BaseModel):
+    id: str = Field(min_length=1, max_length=100)
+    label: str = Field(min_length=1, max_length=180)
+
+
+class StructureSelection(BaseModel):
+    kind: str = Field(min_length=1, max_length=80)
+    label: str = Field(min_length=1, max_length=300)
+    residue_ids: list[str] = Field(default_factory=list, max_length=50)
+    chain: str | None = Field(default=None, max_length=20)
+
+
+class StructureContext(BaseModel):
+    object_id: str = Field(min_length=1, max_length=80)
+    title: str = Field(min_length=1, max_length=260)
+    description: str = Field(default="", max_length=500)
+    format: str = Field(min_length=1, max_length=12)
+    atom_count: int = Field(ge=1, le=75000)
+    residue_count: int = Field(ge=0, le=75000)
+    frame: int = Field(ge=1, le=500)
+    frame_count: int = Field(ge=1, le=500)
+    chains: list[str] = Field(default_factory=list, max_length=100)
+    ligands: list[StructureTarget] = Field(default_factory=list, max_length=100)
+    residues: list[StructureTarget] = Field(default_factory=list, max_length=600)
+    selection: StructureSelection | None = None
+
+
 class ChatRequest(BaseModel):
     question: str = Field(min_length=3, max_length=1200)
     conversation_id: str | None = Field(default=None, max_length=80)
+    structure_context: StructureContext | None = None
 
 
 conversations: OrderedDict[str, deque[dict[str, str]]] = OrderedDict()
@@ -120,8 +149,10 @@ async def chat(payload: ChatRequest, request: Request) -> dict[str, Any]:
     conversation_id = payload.conversation_id or str(uuid.uuid4())
     conversation = _conversation(conversation_id)
     history = list(conversation)
+    structure_context = payload.structure_context.model_dump() if payload.structure_context else None
+    retrieval_question = contextual_search_question(question, structure_context)
     try:
-        in_scope = await asyncio.to_thread(classify_scope, question, provider)
+        in_scope = await asyncio.to_thread(classify_scope, retrieval_question, provider)
         if not in_scope:
             return {
                 "conversation_id": conversation_id,
@@ -129,8 +160,8 @@ async def chat(payload: ChatRequest, request: Request) -> dict[str, Any]:
                 "answer": "I can only answer questions about molecules, chemistry, biotechnology, and closely related biology. Try asking about a protein, compound, pathway, assay, or molecular mechanism.",
                 "sources": [],
             }
-        candidates = await asyncio.to_thread(search_europe_pmc, question)
-        ranked = await asyncio.to_thread(rank_evidence, question, candidates, provider)
+        candidates = await asyncio.to_thread(search_europe_pmc, retrieval_question)
+        ranked = await asyncio.to_thread(rank_evidence, retrieval_question, candidates, provider)
         if not ranked:
             return {
                 "conversation_id": conversation_id,
@@ -138,7 +169,7 @@ async def chat(payload: ChatRequest, request: Request) -> dict[str, Any]:
                 "answer": "I could not find enough citable biomedical evidence for that question. Try naming the molecule, organism, pathway, or experimental method more precisely.",
                 "sources": [],
             }
-        answer, cited_indexes = await asyncio.to_thread(answer_from_evidence, question, ranked, provider, history)
+        answer, cited_indexes, actions = await asyncio.to_thread(answer_from_evidence, question, ranked, provider, history, structure_context)
         if not answer or not cited_indexes:
             return {
                 "conversation_id": conversation_id,
@@ -151,7 +182,7 @@ async def chat(payload: ChatRequest, request: Request) -> dict[str, Any]:
             _cache_source(source)
         conversation.append({"role": "user", "content": question})
         conversation.append({"role": "assistant", "content": answer})
-        return {"conversation_id": conversation_id, "disposition": "answered", "answer": answer, "sources": sources}
+        return {"conversation_id": conversation_id, "disposition": "answered", "answer": answer, "sources": sources, "actions": actions}
     except RagError as error:
         raise HTTPException(status_code=503, detail=str(error)) from error
 

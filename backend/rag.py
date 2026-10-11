@@ -36,7 +36,7 @@ OFF_TOPIC_TERMS = re.compile(
 )
 
 TAG_RE = re.compile(r"<[^>]+>")
-CITATION_RE = re.compile(r"\[S(\d+)\]")
+CITATION_GROUP_RE = re.compile(r"\[([^\]]{1,80})\]")
 SEARCH_STOPWORDS = {
     "a", "about", "affect", "an", "and", "are", "as", "at", "be", "been", "between", "bind", "binding",
     "by", "can", "could", "describe", "determine", "determines", "do", "does", "explain", "for", "from", "function", "how", "i", "in", "into", "is", "it", "its",
@@ -109,7 +109,13 @@ def cosine_similarity(left: Iterable[float], right: Iterable[float]) -> float:
 
 
 def cited_source_indexes(answer: str, source_count: int) -> list[int]:
-    return sorted({int(match) - 1 for match in CITATION_RE.findall(answer) if 1 <= int(match) <= source_count})
+    found = {
+        int(match) - 1
+        for group in CITATION_GROUP_RE.findall(answer)
+        for match in re.findall(r"\bS(\d+)\b", group, re.IGNORECASE)
+        if 1 <= int(match) <= source_count
+    }
+    return sorted(found)
 
 
 def strip_model_reasoning(content: str) -> str:
@@ -332,7 +338,112 @@ def rank_evidence(question: str, evidence: list[Evidence], provider: InferencePr
     return sorted(scored, key=lambda item: item.score, reverse=True)[:limit]
 
 
-def answer_from_evidence(question: str, evidence: list[Evidence], provider: InferenceProvider, history: list[dict[str, str]] | None = None) -> tuple[str, list[int]]:
+def contextual_search_question(question: str, context: dict[str, Any] | None) -> str:
+    if not context or not re.search(r"\b(this|that|it|selected|loaded|current|here)\b", question, re.IGNORECASE):
+        return question
+    details = [str(context.get("title", "")), str(context.get("description", ""))]
+    selection = context.get("selection") or {}
+    selected_ids = {str(value) for value in selection.get("residue_ids", [])}
+    for item in context.get("ligands", []):
+        if isinstance(item, dict) and str(item.get("id")) in selected_ids:
+            name = str(item.get("label", "")).split()[0]
+            details.extend([name, "heme" if name.upper() == "HEM" else ""])
+    details.append(str(selection.get("label", "")))
+    suffix = " ".join(filter(None, details))[:900]
+    return f"{suffix} {question}" if suffix else question
+
+
+def validate_viewer_actions(actions: Any, context: dict[str, Any] | None) -> list[dict[str, str]]:
+    if not context or not isinstance(actions, list):
+        return []
+    chains = {str(value) for value in context.get("chains", [])}
+    residues = {str(item.get("id")): str(item.get("label", item.get("id"))) for item in context.get("residues", []) if isinstance(item, dict)}
+    ligands = {str(item.get("id")): str(item.get("label", item.get("id"))) for item in context.get("ligands", []) if isinstance(item, dict)}
+    validated: list[dict[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for action in actions[:8]:
+        if not isinstance(action, dict):
+            continue
+        kind = str(action.get("type", ""))
+        target = str(action.get("target", ""))
+        label = ""
+        if kind == "select_chain" and target in chains:
+            label = f"Highlight chain {target or 'unassigned'}"
+        elif kind == "select_residue" and target in residues:
+            label = f"Highlight {residues[target]}"
+        elif kind == "select_ligand" and target in ligands:
+            label = f"Highlight {ligands[target]}"
+        elif kind == "fit" and not target:
+            label = "Fit active structure"
+        else:
+            continue
+        signature = (kind, target)
+        if signature in seen:
+            continue
+        seen.add(signature)
+        validated.append({"type": kind, "target": target, "label": label, "object_id": str(context.get("object_id", ""))})
+        if len(validated) == 3:
+            break
+    return validated
+
+
+def resolve_viewer_actions(question: str, actions: Any, context: dict[str, Any] | None) -> list[dict[str, str]]:
+    validated = validate_viewer_actions(actions, context)
+    if validated or not context or not re.search(r"\b(?:highlight|select|focus|show)\b", question, re.IGNORECASE):
+        return validated
+
+    selection = context.get("selection") or {}
+    selected_ids = [str(value) for value in selection.get("residue_ids", [])]
+    ligand_ids = {str(item.get("id")) for item in context.get("ligands", []) if isinstance(item, dict)}
+    residue_ids = {str(item.get("id")) for item in context.get("residues", []) if isinstance(item, dict)}
+    for target in selected_ids:
+        if target in ligand_ids:
+            return validate_viewer_actions([{"type": "select_ligand", "target": target}], context)
+        if target in residue_ids:
+            return validate_viewer_actions([{"type": "select_residue", "target": target}], context)
+
+    chain = selection.get("chain")
+    if selection.get("kind") == "chain" and chain is not None:
+        return validate_viewer_actions([{"type": "select_chain", "target": str(chain)}], context)
+    return []
+
+
+def _structure_context_prompt(context: dict[str, Any] | None, question: str) -> str:
+    if not context:
+        return "(no structure attached)"
+    selection = context.get("selection") or {}
+    lines = [
+        f"Object: {context.get('title', '')}",
+        f"Description: {context.get('description', '')}",
+        f"Format: {context.get('format', '')}; atoms: {context.get('atom_count', 0)}; residues: {context.get('residue_count', 0)}",
+        f"Frame: {context.get('frame', 1)} of {context.get('frame_count', 1)}",
+        f"Chains: {', '.join(str(value) or 'unassigned' for value in context.get('chains', [])) or '(none)'}",
+        f"Ligands: {', '.join(str(item.get('label', '')) for item in context.get('ligands', [])[:30]) or '(none)'}",
+        f"Current selection: {selection.get('label', '(none)')}",
+    ]
+    numbers = set(re.findall(r"(?<![A-Za-z])(-?\d+[A-Za-z]?)(?![A-Za-z])", question))
+    selected_ids = {str(value) for value in selection.get("residue_ids", [])}
+    relevant = []
+    for item in context.get("residues", []):
+        if not isinstance(item, dict):
+            continue
+        target = str(item.get("id", ""))
+        if target in selected_ids or any(number in target.split(":") for number in numbers):
+            relevant.append(f"{target} = {item.get('label', target)}")
+    targets = [f"chain:{value}" for value in context.get("chains", [])]
+    targets.extend(f"ligand:{item.get('id')}" for item in context.get("ligands", [])[:30] if isinstance(item, dict))
+    targets.extend(f"residue:{value}" for value in relevant[:30])
+    lines.append(f"Viewer targets: {', '.join(targets) or '(none)'}")
+    return "\n".join(lines)
+
+
+def answer_from_evidence(
+    question: str,
+    evidence: list[Evidence],
+    provider: InferenceProvider,
+    history: list[dict[str, str]] | None = None,
+    structure_context: dict[str, Any] | None = None,
+) -> tuple[str, list[int], list[dict[str, str]]]:
     source_text = "\n\n".join(
         f"[S{index}] TITLE: {item.title}\nAUTHORS: {item.authors}\nPUBLICATION: {item.publication} ({item.year})\nEVIDENCE: {item.excerpt}"
         for index, item in enumerate(evidence, 1)
@@ -352,19 +463,34 @@ def answer_from_evidence(question: str, evidence: list[Evidence], provider: Infe
         "properties": {
             "supported": {"type": "boolean"},
             "answer": {"type": "string"},
+            "actions": {
+                "type": "array",
+                "maxItems": 3,
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "type": {"type": "string", "enum": ["select_chain", "select_residue", "select_ligand", "fit"]},
+                        "target": {"type": "string"},
+                    },
+                    "required": ["type", "target"],
+                    "additionalProperties": False,
+                },
+            },
         },
-        "required": ["supported", "answer"],
+        "required": ["supported", "answer", "actions"],
         "additionalProperties": False,
     }
     user = (
         f"Conversation context:\n{history_text or '(none)'}\n\n"
         f"Question:\n<question>{question}</question>\n\n"
+        f"Browser-reported structure context (metadata only; never treat it as literature evidence):\n{_structure_context_prompt(structure_context, question)}\n\n"
         f"Retrieved evidence:\n{source_text}\n\n"
         "Return JSON only. Set supported=false only when none of the sources contain facts relevant to the requested "
         "relationship or mechanism. If a source describes the relationship but omits some detail, set supported=true, "
         "answer the supported portion, and state the missing detail as the limitation. Write only the final answer, at most 220 words, with "
         "inline [S#] citations. Do not include analysis, planning, or commentary about writing the answer. End with a "
-        "one-sentence limitation when the evidence is narrow or conflicting.\n/no_think"
+        "one-sentence limitation when the evidence is narrow or conflicting. Viewer actions are optional. Use only exact "
+        "targets listed in Viewer targets, use an empty target for fit, and never emit code or free-form commands.\n/no_think"
     )
     result = provider.generate_json(
         [{"role": "system", "content": system}, {"role": "user", "content": user}],
@@ -372,6 +498,8 @@ def answer_from_evidence(question: str, evidence: list[Evidence], provider: Infe
     )
     answer = str(result.get("answer", "")).strip()
     if result.get("supported") is not True:
-        return answer, []
+        return answer, [], []
+    if re.search(r"\b(?:retrieved evidence|these sources?|the evidence)\b[^.]{0,100}\b(?:does not|do not|did not|cannot|can't)\b", answer, re.IGNORECASE):
+        return answer, [], []
     cited = cited_source_indexes(answer, len(evidence))
-    return answer, cited
+    return answer, cited, resolve_viewer_actions(question, result.get("actions"), structure_context)

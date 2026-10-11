@@ -6,9 +6,12 @@ from backend.rag import (
     Evidence,
     build_search_query,
     cited_source_indexes,
+    contextual_search_question,
     cosine_similarity,
+    resolve_viewer_actions,
     scope_hint,
     strip_model_reasoning,
+    validate_viewer_actions,
 )
 
 
@@ -44,11 +47,51 @@ class RetrievalTests(unittest.TestCase):
 
     def test_only_valid_citations_are_returned(self):
         self.assertEqual(cited_source_indexes("One [S2], two [S1], repeat [S2], invalid [S8].", 3), [0, 1])
+        self.assertEqual(cited_source_indexes("Combined evidence [S1, S3].", 3), [0, 2])
 
     def test_public_source_has_label_and_rounded_score(self):
         source = Evidence("id", "Title", "Excerpt", "Author", "Journal", "2024", "https://example.test", score=0.123456)
         self.assertEqual(source.public("S1")["label"], "S1")
         self.assertEqual(source.public("S1")["score"], 0.1235)
+
+    def test_deictic_questions_use_the_attached_structure_for_retrieval(self):
+        context = {"title": "Human myoglobin", "description": "oxygen-binding protein", "selection": None, "ligands": []}
+        self.assertIn("Human myoglobin", contextual_search_question("How does this bind oxygen?", context))
+        self.assertTrue(contextual_search_question("How does this bind oxygen?", context).startswith("Human myoglobin"))
+        self.assertEqual(contextual_search_question("How does hemoglobin bind oxygen?", context), "How does hemoglobin bind oxygen?")
+
+    def test_viewer_actions_are_allowlisted_and_bound_to_the_active_object(self):
+        context = {
+            "object_id": "object-2",
+            "chains": ["A"],
+            "residues": [{"id": "A:42:GLY", "label": "GLY 42 · chain A"}],
+            "ligands": [{"id": "A:501:HEM", "label": "HEM 501 · chain A"}],
+        }
+        actions = validate_viewer_actions([
+            {"type": "select_ligand", "target": "A:501:HEM"},
+            {"type": "select_residue", "target": "A:999:ALA"},
+            {"type": "script", "target": "alert(1)"},
+            {"type": "fit", "target": ""},
+        ], context)
+        self.assertEqual([action["type"] for action in actions], ["select_ligand", "fit"])
+        self.assertTrue(all(action["object_id"] == "object-2" for action in actions))
+
+    def test_explicit_highlight_request_uses_the_validated_current_selection(self):
+        context = {
+            "object_id": "object-2",
+            "chains": ["A"],
+            "residues": [{"id": "A:501:HEM", "label": "HEM 501 · chain A"}],
+            "ligands": [{"id": "A:501:HEM", "label": "HEM 501 · chain A"}],
+            "selection": {"kind": "ligand", "residue_ids": ["A:501:HEM"], "chain": "A"},
+        }
+        actions = resolve_viewer_actions("Please highlight the selected ligand.", [], context)
+        self.assertEqual(actions, [{
+            "type": "select_ligand",
+            "target": "A:501:HEM",
+            "label": "Highlight HEM 501 · chain A",
+            "object_id": "object-2",
+        }])
+        self.assertEqual(resolve_viewer_actions("What does this ligand do?", [], context), [])
 
 
 class CloudflareProviderTests(unittest.TestCase):

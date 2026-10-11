@@ -12,6 +12,7 @@ import {
   measurementValue, formatMeasurement, matchBackboneAtoms, refinedSuperposition,
 } from './analysis.js';
 import { setupAssistant } from './assistant.js';
+import { buildStructureContext, residueTargetId } from './assistant-context.js';
 import {
   commandExamples, densityFormat, parseCommand, sampledFrameIndexes, validateDensityText,
 } from './advanced.js';
@@ -43,6 +44,7 @@ let trajectoryPlaying = false;
 let frameChanging = false;
 let scenePlaybackToken = 0;
 let scenePlaying = false;
+let assistantController = null;
 
 mountIcons();
 
@@ -278,6 +280,12 @@ function syncSelectionDetail() {
       $('selection-detail').append(atoms);
     }
   }
+  const ask = document.createElement('button');
+  ask.className = 'text-button selection-assistant';
+  ask.type = 'button';
+  ask.dataset.action = 'ask-selection';
+  ask.textContent = 'Ask assistant about this selection';
+  $('selection-detail').append(ask);
 }
 
 function syncNamedSelections() {
@@ -834,6 +842,7 @@ function syncStructure() {
   syncControls();
   syncAnalysis();
   syncAdvanced();
+  assistantController?.refreshContext();
 }
 
 async function openStructure(read, info, format, restore = null) {
@@ -1123,6 +1132,31 @@ function applyTheme(theme) {
   try { localStorage.setItem('molecule3d-theme', theme); } catch { /* Optional preference storage. */ }
 }
 
+function assistantStructureContext(question = '') {
+  return buildStructureContext(activeObject(), selection, question);
+}
+
+function applyAssistantViewerAction(action) {
+  const current = activeObject();
+  if (!current || action?.object_id !== current.id) throw new Error('The attached structure is no longer active. Ask the question again.');
+  if (action.type === 'fit' && !action.target) {
+    renderer.fit(current.id);
+    record(`Assistant fit ${current.title} to view`);
+    return;
+  }
+  if (action.type === 'select_chain') {
+    const chain = current.summary.chains.find(item => item.id === action.target);
+    if (!chain) throw new Error('That chain is no longer available.');
+    setSelection({ objectId: current.id, kind: 'chain', chain: chain.id, primaryKeys: [], secondaryKeys: [], label: `Chain ${chain.label}` }, `Assistant highlighted chain ${chain.label}`);
+    return;
+  }
+  if (!['select_residue', 'select_ligand'].includes(action.type)) throw new Error('That viewer action is not supported.');
+  const residues = action.type === 'select_ligand' ? current.summary.ligands : current.summary.residues;
+  const residue = residues.find(item => residueTargetId(item) === action.target);
+  if (!residue) throw new Error('That residue is no longer available in the active frame.');
+  selectResidue(residue.key, action.type === 'select_ligand' ? 'Ligand' : 'Residue');
+}
+
 const actions = {
   upload: () => { if (ready && !busy) { $('file-input').value = ''; $('file-input').click(); } },
   'focus-pdb': () => { $('pdb-id').focus(); },
@@ -1176,6 +1210,7 @@ const actions = {
   },
   help: () => $('help-dialog').showModal(),
   assistant: () => $('assistant-dialog').showModal(),
+  'ask-selection': () => assistantController?.openForSelection(),
   activity: () => $('activity-dialog').showModal(),
   'cancel-measurement': cancelMeasurement,
   'align-objects': alignActiveObject,
@@ -1416,4 +1451,8 @@ try {
   notice('The 3D viewer could not start. Enable WebGL / hardware acceleration in your browser, then reload.', true);
 }
 syncStructure();
-setupAssistant({ onRecord: record });
+assistantController = setupAssistant({
+  onRecord: record,
+  getStructureContext: assistantStructureContext,
+  onViewerAction: applyAssistantViewerAction,
+});

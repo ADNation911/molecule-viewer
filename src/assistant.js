@@ -1,3 +1,5 @@
+import { createCitedReport, reportFilename } from './assistant-context.js';
+
 const configuredEndpoint = import.meta.env.VITE_RAG_API_URL?.trim();
 const browserHost = typeof window === 'undefined' ? '' : window.location.hostname;
 const browserOrigin = typeof window === 'undefined' ? '' : window.location.origin;
@@ -14,7 +16,7 @@ function normalizedEndpoint(value) {
   return value.trim().replace(/\/+$/, '');
 }
 
-function createMessage(role, text, disposition = '') {
+function createMessage(role, text, disposition = '', contextLabel = '') {
   const article = document.createElement('article');
   article.className = `assistant-message is-${role}`;
   if (disposition) article.dataset.disposition = disposition;
@@ -24,6 +26,12 @@ function createMessage(role, text, disposition = '') {
   const body = document.createElement('p');
   body.textContent = text;
   article.append(label, body);
+  if (contextLabel) {
+    const context = document.createElement('span');
+    context.className = 'assistant-message-context';
+    context.textContent = `Context · ${contextLabel}`;
+    article.append(context);
+  }
   return article;
 }
 
@@ -57,7 +65,58 @@ function createSources(sources) {
   return section;
 }
 
-export function setupAssistant({ onRecord = () => {} } = {}) {
+function downloadReport(question, payload, context) {
+  const content = createCitedReport({ question, answer: payload.answer, sources: payload.sources, context });
+  const url = URL.createObjectURL(new Blob([content], { type: 'text/markdown;charset=utf-8' }));
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = reportFilename(context);
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function createResponse(question, payload, context, onViewerAction, onRecord) {
+  const section = document.createElement('section');
+  section.className = 'assistant-response';
+  section.append(createMessage('assistant', payload.answer, payload.disposition));
+  if (payload.sources?.length) section.append(createSources(payload.sources));
+  if (payload.actions?.length || payload.sources?.length) {
+    const tools = document.createElement('div');
+    tools.className = 'assistant-response-tools';
+    for (const action of payload.actions || []) {
+      const button = document.createElement('button');
+      button.className = 'button assistant-action';
+      button.type = 'button';
+      button.textContent = action.label;
+      button.addEventListener('click', async () => {
+        button.disabled = true;
+        try {
+          await onViewerAction(action);
+          button.textContent = 'Applied';
+        } catch (error) {
+          button.textContent = 'Unavailable';
+          button.title = error.message || 'The viewer action is no longer available.';
+        }
+      });
+      tools.append(button);
+    }
+    if (payload.sources?.length) {
+      const report = document.createElement('button');
+      report.className = 'text-button assistant-report';
+      report.type = 'button';
+      report.textContent = 'Download cited report';
+      report.addEventListener('click', () => {
+        downloadReport(question, payload, context);
+        onRecord('Downloaded cited literature report');
+      });
+      tools.append(report);
+    }
+    section.append(tools);
+  }
+  return section;
+}
+
+export function setupAssistant({ onRecord = () => {}, getStructureContext = () => null, onViewerAction = () => {} } = {}) {
   const dialog = document.getElementById('assistant-dialog');
   const form = document.getElementById('assistant-form');
   const input = document.getElementById('assistant-question');
@@ -66,10 +125,26 @@ export function setupAssistant({ onRecord = () => {} } = {}) {
   const status = document.getElementById('assistant-status');
   const submit = document.getElementById('assistant-submit');
   const headerDot = document.getElementById('assistant-status-dot');
+  const contextToggle = document.getElementById('assistant-context-toggle');
+  const contextTitle = document.getElementById('assistant-context-title');
+  const contextDetail = document.getElementById('assistant-context-detail');
   let conversationId = null;
   let working = false;
 
   endpointInput.value = endpointValue();
+
+  function refreshContext(question = '') {
+    const context = contextToggle.checked ? getStructureContext(question) : null;
+    if (context) {
+      contextTitle.textContent = context.title;
+      const selection = context.selection?.label ? ` · ${context.selection.label}` : '';
+      contextDetail.textContent = `${context.format.toUpperCase()} · ${context.atom_count.toLocaleString()} atoms · frame ${context.frame}/${context.frame_count}${selection}`;
+    } else {
+      contextTitle.textContent = contextToggle.checked ? 'No active structure' : 'Structure context disabled';
+      contextDetail.textContent = contextToggle.checked ? 'Load or select an object to attach its metadata.' : 'Questions will use literature evidence only.';
+    }
+    return context;
+  }
 
   function setStatus(kind, text) {
     status.dataset.status = kind;
@@ -108,17 +183,20 @@ export function setupAssistant({ onRecord = () => {} } = {}) {
   }
 
   document.querySelectorAll('[data-action="assistant"]').forEach(button => button.addEventListener('click', () => {
+    refreshContext();
     checkHealth();
     queueMicrotask(() => input.focus());
   }));
   endpointInput.addEventListener('change', saveEndpoint);
+  contextToggle.addEventListener('change', () => refreshContext());
   document.getElementById('assistant-retry').addEventListener('click', checkHealth);
 
   form.addEventListener('submit', async event => {
     event.preventDefault();
     const question = input.value.trim();
     if (!question || working) return;
-    messages.append(createMessage('user', question));
+    const context = refreshContext(question);
+    messages.append(createMessage('user', question, '', context?.title || 'literature only'));
     input.value = '';
     working = true;
     submit.disabled = true;
@@ -131,13 +209,12 @@ export function setupAssistant({ onRecord = () => {} } = {}) {
       const response = await fetch(`${normalizedEndpoint(endpointInput.value)}/api/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ question, conversation_id: conversationId }),
+        body: JSON.stringify({ question, conversation_id: conversationId, structure_context: context }),
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(payload.detail || `Assistant request failed (${response.status})`);
       conversationId = payload.conversation_id;
-      pending.replaceWith(createMessage('assistant', payload.answer, payload.disposition));
-      if (payload.sources?.length) messages.append(createSources(payload.sources));
+      pending.replaceWith(createResponse(question, payload, context, onViewerAction, onRecord));
       setStatus('ready', payload.disposition === 'answered' ? `${payload.sources.length} cited source${payload.sources.length === 1 ? '' : 's'}` : 'Ready for a molecule question');
       onRecord(payload.disposition === 'answered' ? `Assistant answered with ${payload.sources.length} cited sources` : 'Assistant declined or lacked evidence');
     } catch (error) {
@@ -151,5 +228,20 @@ export function setupAssistant({ onRecord = () => {} } = {}) {
     }
   });
 
+  refreshContext();
   checkHealth();
+  return {
+    refreshContext,
+    openForSelection() {
+      refreshContext();
+      if (!dialog.open) dialog.showModal();
+      const context = getStructureContext();
+      const selectedLigand = context?.ligands?.find(item => context.selection?.residue_ids?.includes(item.id));
+      input.value = selectedLigand
+        ? `What role does ${selectedLigand.label.split(' ')[0]} play in ${context.title}?`
+        : context?.selection?.label ? `What is known about ${context.selection.label} in ${context.title}?` : 'What is known about this structure?';
+      checkHealth();
+      queueMicrotask(() => { input.focus(); input.select(); });
+    },
+  };
 }
